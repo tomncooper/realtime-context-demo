@@ -1,0 +1,144 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Quarkus
+*-runner
+*-runner.jar
+.quarkus/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.logs
+hs_err_pid*
+replay_pid*
+
+# IDE - IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE - Eclipse
+.classpath
+.project
+.settings/
+.metadata/
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.loadpath
+.recommenders
+
+# IDE - VSCode
+.vscode/
+*.code-workspace
+.history/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Kafka Streams state stores
+/tmp/kafka-streams/
+
+# Logs
+*.log
+logs/
+
+# Container images
+*.tar
+*.tar.gz
+
+# Kubernetes
+*-secret.yaml
+*-secrets.yaml
+*.kubeconfig
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Generated Avro sources (optional - comment out if you want to track generated code)
+# schemas/target/generated-sources/
+
+# Local environment variables
+.env
+.env.local
+.env.*.local
+
+# Coverage and test reports
+coverage/
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.coveragerc
+
+# Backup files
+*.orig
+*.rej

@@ -1,0 +1,33 @@
+{
+  "type": "record",
+  "name": "ShipmentEvent",
+  "namespace": "com.smartship.logistics.events",
+  "doc": "Simplified shipment lifecycle event for Phase 1",
+  "fields": [
+    {
+      "name": "shipment_id",
+      "type": "string",
+      "doc": "Unique shipment identifier"
+    },
+    {
+      "name": "warehouse_id",
+      "type": "string",
+      "doc": "Origin warehouse ID"
+    },
+    {
+      "name": "event_type",
+      "type": {
+        "type": "enum",
+        "name": "ShipmentEventType",
+        "symbols": ["CREATED", "IN_TRANSIT", "DELIVERED"]
+      },
+      "doc": "Shipment lifecycle stage"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event timestamp in milliseconds"
+    }
+  ]
+}

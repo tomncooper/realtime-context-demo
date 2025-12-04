@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-generators
+  namespace: smartship
+  labels:
+    app: data-generators
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-generators
+  template:
+    metadata:
+      labels:
+        app: data-generators
+    spec:
+      containers:
+        - name: data-generators
+          image: smartship/data-generators:latest
+          imagePullPolicy: Never
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "events-cluster-kafka-bootstrap.smartship.svc.cluster.local:9092"
+            - name: APICURIO_REGISTRY_URL
+              value: "http://apicurio-registry.smartship.svc.cluster.local:8080/apis/registry/v2"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"

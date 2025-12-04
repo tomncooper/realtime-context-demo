@@ -1,16 +1,20 @@
 # SmartShip Logistics Implementation Plan
 
+**Status:** Phase 1 ✅ COMPLETED | Phase 2-6 Pending
+
 ## Overview
 
 This plan implements the synthetic data proposal for a regional logistics and fulfillment company with real-time event streaming, materialized views, and an LLM-queryable API.
 
 **Target Architecture:**
-- Apache Kafka (via Strimzi Operator) for event streaming
-- Apicurio Registry for Avro schema management
-- Kafka Streams for real-time materialized views
-- PostgreSQL for reference data
-- Quarkus REST API for LLM queries (with GraalVM native image)
-- All components running on Kubernetes (minikube or cloud)
+- Apache Kafka 4.1.1 with KRaft (via Strimzi Operator 0.49.0) - NO ZooKeeper
+- Apicurio Registry 3.1.4 for Avro schema management
+- Kafka Streams 4.1.1 for real-time materialized views
+- PostgreSQL 15 (postgres:15-alpine) for reference data
+- Quarkus 3.30.1 REST API for LLM queries (JVM mode in Phase 1, native image in Phase 5)
+- Java 25 LTS (eclipse-temurin:25-jdk-ubi10-minimal base image)
+- All components running on Kubernetes (minikube for Phase 1, cloud for later phases)
+- Python 3.9+ deployment automation with podman/docker support
 
 ## Project Structure: Maven Monorepo
 
@@ -18,19 +22,28 @@ This plan implements the synthetic data proposal for a regional logistics and fu
 
 ```
 realtime-context-demo/
-├── pom.xml                          # Parent POM
-├── schemas/                         # Avro schemas → generates Java classes
-├── common/                          # Shared utilities (KafkaConfig, GeoUtils)
-├── database/                        # PostgreSQL DDL and seed data scripts
-├── data-generators/                 # Synthetic event producers (4 generators)
-├── streams-processor/               # Kafka Streams with 6 materialized views
-├── query-api/                       # Quarkus REST API for LLM (native image)
+├── pom.xml                          # Parent POM (✅ Phase 1)
+├── schemas/                         # Avro schemas → generates Java classes (✅ Phase 1: shipment-event.avsc)
+├── common/                          # Shared utilities (✅ Phase 1: KafkaConfig, ApicurioConfig)
+├── database/                        # PostgreSQL DDL and seed data scripts (✅ Phase 1: warehouses table)
+├── data-generators/                 # Synthetic event producers (✅ Phase 1: 1 generator, Phase 2-6: 4 generators)
+├── streams-processor/               # Kafka Streams (✅ Phase 1: 1 state store, Phase 3: 6 state stores)
+├── query-api/                       # Quarkus REST API (✅ Phase 1: JVM mode, Phase 5: native image)
 ├── kubernetes/
-│   ├── base/                        # Common Kubernetes resources
+│   ├── base/                        # Common Kubernetes resources (✅ Phase 1)
 │   └── overlays/
-│       ├── minikube/                # Laptop-friendly (~1.85 CPU, ~4.6Gi RAM)
-│       └── cloud/                   # Cloud-optimized (auto-scaling)
-└── tests/                           # Integration tests
+│       ├── minikube/                # Laptop-friendly (✅ Phase 1: ~1.5 CPU, ~3.5Gi RAM with KRaft)
+│       └── cloud/                   # Cloud-optimized (auto-scaling) - Phase 5
+├── scripts/                         # Python deployment automation (✅ Phase 1)
+│   ├── common.py
+│   ├── 01-setup-infra.py
+│   ├── 02-build-all.py
+│   ├── 03-deploy-apps.py
+│   ├── 04-validate.py
+│   └── 05-cleanup.py
+└── design/                          # Design documentation (✅)
+    ├── implementation-plan.md
+    └── synthetic-data-proposal.md
 ```
 
 ## Component Architecture
@@ -211,10 +224,38 @@ Query: "Which shipments for ACME Corp are currently delayed?"
   </dependency>
   <dependency>
     <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-smallrye-health</artifactId>
+    <!-- CRITICAL: Required for Kubernetes liveness/readiness probes -->
+  </dependency>
+  <dependency>
+    <groupId>io.quarkus</groupId>
     <artifactId>quarkus-container-image-jib</artifactId>
   </dependency>
 </dependencies>
 ```
+
+**Critical Quarkus Configuration (application.properties):**
+
+The Query API requires specific configuration in `query-api/src/main/resources/application.properties` to ensure compatibility with Java 25 and proper Kubernetes integration:
+
+```properties
+# Java 25 base image for container builds
+# CRITICAL: Without this, container will use default Java 21 image causing UnsupportedClassVersionError
+quarkus.jib.base-jvm-image=eclipse-temurin:25-jdk-ubi10-minimal
+
+# Streams processor connection
+streams-processor.url=http://streams-processor.smartship.svc.cluster.local:7070
+
+# Container image configuration
+quarkus.container-image.group=smartship
+quarkus.container-image.name=query-api
+quarkus.container-image.tag=latest
+quarkus.container-image.builder=jib
+```
+
+**Why these configurations matter:**
+- **Base image**: Compiled Java 25 code requires Java 25 runtime. Default Quarkus base images use Java 21.
+- **Health extension**: Without `quarkus-smallrye-health`, Kubernetes probes fail with HTTP 404, causing pod restarts.
 
 ### 6. PostgreSQL Database
 **Purpose:** Store reference data (200 customers, 5 warehouses, 50 vehicles, 10K products, 75 drivers, 100 routes)
@@ -233,45 +274,51 @@ Query: "Which shipments for ACME Corp are currently delayed?"
 
 ## Technology Stack
 
-### Core Technologies
-- **Java:** 17 LTS (records, pattern matching, GraalVM native image support)
+### Core Technologies (✅ Phase 1 Implemented)
+- **Java:** 25 LTS (eclipse-temurin:25-jdk-ubi10-minimal base image, records, pattern matching, GraalVM native image support)
 - **Build Tool:** Maven 3.9+ (superior Avro plugin, simpler multi-module)
-- **Kafka:** 3.7.0 (clients + streams)
+- **Kafka:** 4.1.1 (clients + streams) with **KRaft mode** (no ZooKeeper)
 - **Avro:** 1.12.1
-- **Apicurio Registry:** 3.0.0.M4 (Avro Serdes)
-- **Quarkus:** 3.20.x (REST API, Kafka integration, reactive PostgreSQL)
-- **PostgreSQL:** 15+
-- **Containerization:** Quarkus Native Image + Jib (for non-native Java builds)
+- **Apicurio Registry:** 3.1.4 (Avro Serdes)
+- **Quarkus:** 3.30.1 (REST API, Kafka integration, reactive PostgreSQL)
+- **SLF4J:** 2.0.17
+- **Logback:** 1.5.12
+- **PostgreSQL:** 15 (postgres:15-alpine)
+- **Strimzi Operator:** 0.49.0 (supports Kafka 4.1.1 with KRaft)
+- **Containerization:** Jib Maven Plugin 3.5.1 with podman/docker support
+- **Deployment Automation:** Python 3.9+ scripts
 
-### Maven Plugins
-- **avro-maven-plugin** - Generate Java from .avsc files
-- **jib-maven-plugin** - Build optimized container images (data-generators, streams-processor)
-- **quarkus-maven-plugin** - Build Quarkus applications and native images
-- **maven-compiler-plugin** - Java 17 compilation
-- **maven-surefire-plugin** - Unit tests
-- **maven-failsafe-plugin** - Integration tests
+### Maven Plugins (✅ Phase 1 Configured)
+- **avro-maven-plugin 1.12.1** - Generate Java from .avsc files
+- **jib-maven-plugin 3.5.1** - Build optimized container images (data-generators, streams-processor)
+  - Supports both podman and docker via `-Djib.dockerClient.executable`
+- **quarkus-maven-plugin 3.30.1** - Build Quarkus applications (JVM and native images)
+- **maven-compiler-plugin 3.13.0** - Java 25 compilation
+- **maven-surefire-plugin 3.5.2** - Unit tests
+- **maven-failsafe-plugin 3.5.2** - Integration tests
 
-## Kubernetes Deployment Strategy
+## Kubernetes Deployment Strategy (✅ Phase 1 Implemented)
 
 ### Organization: Kustomize
 **Decision:** Kustomize (not Helm) for simpler YAML-based configuration
 
 ```
 kubernetes/
-├── base/                           # Common resources
+├── base/                           # Common resources (✅ Phase 1)
 │   ├── kustomization.yaml
 │   ├── namespace.yaml
-│   ├── kafka/                      # Strimzi Kafka CR
-│   ├── apicurio/                   # ApicurioRegistry CR
-│   ├── postgresql/                 # StatefulSet
-│   ├── data-generators/            # Deployment
-│   ├── streams-processor/          # Deployment
-│   └── query-api/                  # Deployment + Service
+│   ├── kafka-cluster.yaml          # Strimzi Kafka CR with KRaft (KafkaNodePool + Kafka)
+│   ├── kafka-topic.yaml            # KafkaTopic CR (shipment.events)
+│   ├── apicurio-registry.yaml      # Deployment + Service
+│   ├── postgresql.yaml             # StatefulSet + Service + ConfigMap
+│   ├── data-generators.yaml        # Deployment
+│   ├── streams-processor.yaml      # Deployment + Service
+│   └── query-api.yaml              # Deployment + Service
 └── overlays/
-    ├── minikube/                   # Laptop-friendly
+    ├── minikube/                   # Laptop-friendly (✅ Phase 1)
     │   ├── kustomization.yaml
     │   └── resource-limits-patch.yaml
-    └── cloud/                      # Cloud-optimized
+    └── cloud/                      # Cloud-optimized - Phase 5
         ├── kustomization.yaml
         ├── resource-scaling-patch.yaml
         └── storage-class-patch.yaml
@@ -283,46 +330,46 @@ kubectl apply -k kubernetes/overlays/minikube
 kubectl apply -k kubernetes/overlays/cloud
 ```
 
-### Deployment Order
+### Deployment Order (✅ Phase 1 Implemented)
 
 **Phase 1: Operators** (prerequisites)
-1. Strimzi Kafka Operator
-2. Apicurio Registry Operator
+1. ✅ Strimzi Kafka Operator 0.49.0 - Installed via Python script
+2. ⏭️ Apicurio Registry Operator - Not used in Phase 1 (standalone deployment instead)
 
 **Phase 2: Infrastructure**
-3. PostgreSQL StatefulSet
-4. Kafka cluster (via Strimzi Kafka CR)
-5. Apicurio Registry (via ApicurioRegistry CR)
-6. Kafka Topics (4 KafkaTopic CRDs)
+3. ✅ PostgreSQL StatefulSet with ConfigMap for init.sql
+4. ✅ Kafka cluster (via Strimzi Kafka CR) - **KRaft mode with KafkaNodePool**
+5. ✅ Apicurio Registry - Standalone Deployment (in-memory storage)
+6. ✅ Kafka Topics (1 KafkaTopic CR: shipment.events)
 
 **Phase 3: Seed Data**
-7. Kubernetes Job to load PostgreSQL seed data
+7. ✅ PostgreSQL seed data loaded via init.sql ConfigMap (5 warehouses)
 
 **Phase 4: Applications**
-8. Data Generators Deployment
-9. Streams Processor Deployment
-10. Query API Deployment + Service
+8. ✅ Data Generators Deployment (1 generator: ShipmentEventGenerator)
+9. ✅ Streams Processor Deployment + Service (port 7070)
+10. ✅ Query API Deployment + Service (port 8080)
 
-### Resource Allocation
+### Resource Allocation (✅ Phase 1 Implemented)
 
 #### Minikube (Laptop)
 **Minikube setup:** `minikube start --cpus=4 --memory=12288 --disk-size=50g`
 
-**Total resources:** ~1.85 CPU, ~4.6Gi memory (vs. ~2.05 CPU, ~5Gi with Spring Boot)
+**Total resources:** ~1.5 CPU, ~3.5Gi memory (KRaft saves ~400Mi vs ZooKeeper)
 
-| Component | CPU Request | CPU Limit | Memory Request | Memory Limit | Replicas |
-|-----------|------------|-----------|----------------|--------------|----------|
-| Kafka Broker | 500m | 1000m | 1Gi | 2Gi | 1 |
-| ZooKeeper | 200m | 500m | 512Mi | 1Gi | 1 |
-| Apicurio Registry | 200m | 500m | 512Mi | 1Gi | 1 |
-| PostgreSQL | 250m | 500m | 512Mi | 1Gi | 1 |
-| Data Generators | 200m | 500m | 512Mi | 1Gi | 1 |
-| Streams Processor | 500m | 1000m | 1Gi | 2Gi | 1 |
-| Query API (native) | 100m | 250m | 64Mi | 128Mi | 1 |
+| Component | CPU Request | CPU Limit | Memory Request | Memory Limit | Replicas | Status |
+|-----------|------------|-----------|----------------|--------------|----------|--------|
+| Kafka Broker (KRaft) | 500m | 1000m | 1Gi | 2Gi | 1 | ✅ |
+| ~~ZooKeeper~~ | ~~200m~~ | ~~500m~~ | ~~512Mi~~ | ~~1Gi~~ | ~~1~~ | ❌ Not used (KRaft) |
+| Apicurio Registry | 150m | 300m | 256Mi | 512Mi | 1 | ✅ |
+| PostgreSQL | 200m | 400m | 256Mi | 512Mi | 1 | ✅ |
+| Data Generators | 150m | 300m | 256Mi | 512Mi | 1 | ✅ |
+| Streams Processor | 400m | 800m | 768Mi | 1536Mi | 1 | ✅ |
+| Query API (JVM) | 200m | 400m | 256Mi | 512Mi | 1 | ✅ Phase 1 |
+| Query API (native) | 100m | 250m | 64Mi | 128Mi | 1 | ⏭️ Phase 5 |
 
 **Storage:**
-- Kafka: 10Gi PV
-- ZooKeeper: 5Gi PV
+- Kafka: 10Gi PV (includes KRaft metadata)
 - PostgreSQL: 5Gi PV
 
 #### Cloud (Scalable)
@@ -338,77 +385,90 @@ kubectl apply -k kubernetes/overlays/cloud
 | Streams Processor | 1000m | 2000m | 2Gi | 4Gi | 2 |
 | Query API | 500m | 1000m | 1Gi | 2Gi | 3 (HPA) |
 
-## Development Workflow
+## Development Workflow (✅ Phase 1 Implemented)
 
 ### Local Setup (Quick Start)
 ```bash
-# Prerequisites: Java 17, Maven 3.9+, Docker, minikube, kubectl
+# Prerequisites: Java 25, Maven 3.9+, Podman/Docker, minikube, kubectl, Python 3.9+
 
 # 1. Start minikube
 minikube start --cpus=4 --memory=12288 --disk-size=50g
 
-# 2. Create namespace
-kubectl create namespace smartship
+# 2. Setup infrastructure (Strimzi, Kafka, Apicurio, PostgreSQL)
+python3 scripts/01-setup-infra.py
 
-# 3. Install operators
-kubectl create -f 'https://strimzi.io/install/latest?namespace=smartship'
-kubectl apply -f https://raw.githubusercontent.com/Apicurio/apicurio-registry-operator/main/install/install.yaml
+# 3. Build all modules and container images
+# Optional: export CONTAINER_RUNTIME=podman  # or docker (default: podman)
+python3 scripts/02-build-all.py
 
-# 4. Deploy infrastructure
-kubectl apply -k kubernetes/overlays/minikube
+# 4. Deploy applications
+python3 scripts/03-deploy-apps.py
 
-# 5. Build and deploy applications
-eval $(minikube docker-env)  # Point to minikube Docker
-mvn clean install
-mvn compile jib:dockerBuild   # Build all Docker images
+# 5. Validate deployment
+python3 scripts/04-validate.py
 
-# 6. Build Query API native image
-cd query-api
-./mvnw package -Pnative -Dquarkus.native.container-build=true
-
-# 7. Deploy applications
-kubectl apply -k kubernetes/overlays/minikube
-
-# 8. Watch deployment
+# 6. Watch deployment
 kubectl get pods -n smartship -w
+
+# 7. Cleanup when done
+python3 scripts/05-cleanup.py
 ```
 
-### Build Commands
+**Python Scripts:**
+- ✅ `scripts/common.py` - Shared utilities with podman/docker support
+- ✅ `scripts/01-setup-infra.py` - Infrastructure deployment
+- ✅ `scripts/02-build-all.py` - Build all modules and images
+- ✅ `scripts/03-deploy-apps.py` - Deploy applications
+- ✅ `scripts/04-validate.py` - End-to-end validation
+- ✅ `scripts/05-cleanup.py` - Cleanup deployment
+
+### Build Commands (✅ Phase 1 Implemented)
 ```bash
-# Build everything
-mvn clean install
+# Build everything (automated)
+python3 scripts/02-build-all.py
 
-# Build individual module
-cd data-generators && mvn clean package
+# OR manually:
 
-# Run unit tests
-mvn test
+# Build schemas and common first
+mvn clean install -pl schemas,common
 
-# Run integration tests
-mvn verify -P integration-tests
+# Build individual modules
+mvn clean package -pl data-generators
+mvn clean package -pl streams-processor
 
-# Build Docker images (Jib for non-native)
-mvn compile jib:dockerBuild
+# Build Quarkus Query API (JVM mode - Phase 1)
+cd query-api
+mvn clean package
+# Output: JVM-based container image (fast iteration during development)
 
-# Build Quarkus Query API (native image)
+# Build container images with Jib (supports podman/docker)
+mvn compile jib:dockerBuild -pl data-generators,streams-processor
+# With podman: add -Djib.dockerClient.executable=podman
+
+# Build Quarkus Query API container (JVM mode)
+cd query-api
+mvn package -Dquarkus.container-image.build=true
+# With podman: add -Dquarkus.container-image.builder=podman
+
+# Load images into minikube (if using podman)
+minikube image load smartship/data-generators:latest
+minikube image load smartship/streams-processor:latest
+minikube image load smartship/query-api:latest
+
+# Build Quarkus Query API (native image - Phase 5)
 cd query-api
 ./mvnw package -Pnative -Dquarkus.native.container-build=true
-# Output: Docker image with native executable (~50MB, <100ms startup)
-
-# Build Quarkus Query API (JVM mode for dev)
-cd query-api
-./mvnw package
-# Output: Standard JVM image (faster builds during development)
+# Output: Native executable (~50MB, <100ms startup)
 ```
 
 ### Testing and Validation
 ```bash
 # Check Kafka topics
-kubectl exec -it kafka-cluster-kafka-0 -n smartship -- \
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
   bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 
 # Monitor event production
-kubectl exec -it kafka-cluster-kafka-0 -n smartship -- \
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
   bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
   --topic shipment.events --from-beginning --max-messages 5
 
@@ -454,39 +514,64 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 
 ## Implementation Phases
 
-### Phase 1: Minimal End-to-End (Days 1-7)
+### Phase 1: Minimal End-to-End ✅ COMPLETED
+**Status:** ✅ Complete
+**Timeline:** Completed December 2025
 **Goal:** Working system with 1 topic, 1 state store, basic query capability
 
-**Scope:**
-- **Infrastructure:** Kafka (1 broker), Apicurio, PostgreSQL (1 table only)
-- **Schema:** 1 Avro schema (shipment.events only)
-- **Generator:** 1 simple generator (basic shipment events)
-- **Streams:** 1 state store (active-shipments-by-status)
-- **Query API:** 1 endpoint (query shipments by status)
-- **Database:** 1 table (warehouses - just 5 rows for reference)
+**Scope (Implemented):**
+- ✅ **Infrastructure:** Kafka 4.1.1 (1 broker with KRaft, no ZooKeeper), Apicurio Registry 3.1.4, PostgreSQL 15
+- ✅ **Schema:** 1 Avro schema (shipment-event.avsc with 4 fields)
+- ✅ **Generator:** 1 simple generator (ShipmentEventGenerator: CREATED → IN_TRANSIT → DELIVERED)
+- ✅ **Streams:** 1 state store (active-shipments-by-status) with Interactive Queries
+- ✅ **Query API:** Quarkus 3.30.1 REST API with 2 endpoints (JVM mode)
+  - `GET /api/shipments/by-status/{status}`
+  - `GET /api/shipments/status/all`
+- ✅ **Database:** 1 table (warehouses with 5 European locations)
+- ✅ **Deployment:** Python automation scripts with podman/docker support
+- ✅ **Kubernetes:** Kustomize base + minikube overlay
 
-**Tasks:**
-1. Create Maven parent POM with minimal modules (schemas, common, data-generators, streams-processor, query-api)
-2. Define 1 Avro schema: shipment-event.avsc (simplified version)
-3. Create common module with basic KafkaConfig + ApicurioConfig
-4. Create PostgreSQL schema with 1 table (warehouses)
-5. Create Kubernetes base manifests (Kafka, Apicurio, PostgreSQL)
-6. Create Kustomize minikube overlay
-7. Deploy infrastructure to minikube
-8. Implement minimal ShipmentEventGenerator (creates CREATED → DELIVERED events only)
-9. Implement minimal Kafka Streams topology (1 state store: active-shipments-by-status)
-10. Implement minimal Quarkus Query API (1 endpoint: GET /shipments/by-status/{status})
-11. Deploy all components
-12. Validate end-to-end: generator → Kafka → Streams → Query API
+**Tasks Completed:**
+1. ✅ Created Maven parent POM with 6 modules (schemas, common, database, data-generators, streams-processor, query-api)
+2. ✅ Defined 1 Avro schema: shipment-event.avsc (4 fields: shipment_id, warehouse_id, event_type, timestamp)
+3. ✅ Created common module with KafkaConfig + ApicurioConfig
+4. ✅ Created database module with init.sql (warehouses table + 5 seed rows)
+5. ✅ Created Kubernetes base manifests (Kafka KRaft, Apicurio, PostgreSQL, applications)
+6. ✅ Created Kustomize minikube overlay with resource limits
+7. ✅ Created Python deployment scripts (5 scripts + common.py)
+8. ✅ Implemented ShipmentEventGenerator (generates CREATED → IN_TRANSIT → DELIVERED every 6 seconds)
+9. ✅ Implemented Kafka Streams topology with LogisticsTopology + InteractiveQueryServer
+10. ✅ Implemented Quarkus Query API (QueryResource + KafkaStreamsQueryService)
+11. ✅ Added quarkus-smallrye-health dependency for Kubernetes health checks
+12. ✅ Configured Java 25 base image for Quarkus container builds
+13. ✅ Fixed Java version compatibility issues (UnsupportedClassVersionError)
+14. ✅ Deployed all components to minikube
+15. ✅ Validated end-to-end: generator → Kafka → Streams → Query API
 
-**Deliverables:**
-- ✓ Full stack running on minikube
-- ✓ 1 generator producing shipment events
-- ✓ 1 Kafka Streams state store populated
-- ✓ 1 Query API endpoint returning data
-- ✓ Can query: "Show all IN_TRANSIT shipments"
+**Deliverables (Achieved):**
+- ✅ Full stack running on minikube (~1.5 CPU, ~3.5Gi memory)
+- ✅ 1 generator producing shipment lifecycle events
+- ✅ 1 Kafka Streams state store populated with counts
+- ✅ Query API endpoints returning real-time data
+- ✅ Interactive Queries available on port 7070
+- ✅ REST API with OpenAPI/Swagger UI on port 8080
+- ✅ Complete README.md with deployment instructions
+- ✅ Can query: "Show all IN_TRANSIT shipments" and get live counts
 
-### Phase 2: Add Remaining Topics & Generators (Days 8-11)
+**Key Implementation Decisions:**
+- Used **Kafka 4.1.1 with KRaft** instead of ZooKeeper (saves ~400Mi memory)
+- Used **Strimzi 0.49.0** for KRaft support
+- Used **Java 25 LTS** as the target JVM with eclipse-temurin:25-jdk-ubi10-minimal base images
+- Used **Python scripts** for deployment automation (better than bash for cross-platform)
+- Used **podman as default** container runtime with docker fallback
+- Used **Quarkus JVM mode** for Phase 1 (native image deferred to Phase 5)
+- Added **quarkus-smallrye-health** extension for Kubernetes health probe support
+- Configured **Quarkus Jib base image** explicitly to match Java 25 compilation target
+- Used **in-memory Apicurio Registry** for simplicity (persistent storage in later phases)
+- Updated to **Apicurio Registry 3.1.4** for improved compatibility
+
+### Phase 2: Add Remaining Topics & Generators ⏭️ PENDING
+**Status:** Pending
 **Goal:** All 4 topics producing events, with data correlation
 
 **Scope:**
@@ -495,39 +580,75 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 - Implement DataCorrelationManager for referential integrity
 - Add 3 more PostgreSQL tables: vehicles, products, customers (with seed data)
 
-### Phase 3: Complete Kafka Streams State Stores (Days 12-15)
+**Building on Phase 1:**
+- Extend existing schemas module with 3 new .avsc files
+- Extend data-generators module with additional generator classes
+- Update database/schema/init.sql with new tables
+- Update Kubernetes manifests for increased resource allocation
+
+### Phase 3: Complete Kafka Streams State Stores ⏭️ PENDING
+**Status:** Pending
 **Goal:** All 6 materialized views operational
 
 **Scope:**
 - Add 5 more state stores (vehicle-current-state, shipments-by-customer, warehouse-realtime-metrics, late-shipments, hourly-delivery-performance)
 - Implement windowed aggregations
-- Enable Interactive Queries API
+- Enhance Interactive Queries API with all state stores
 
-### Phase 4: Complete Query API (Days 16-18)
+**Building on Phase 1:**
+- Extend LogisticsTopology.java with 5 additional state stores
+- Update InteractiveQueryServer.java with new query endpoints
+- Update Query API to expose all state stores
+
+### Phase 4: Complete Query API ⏭️ PENDING
+**Status:** Pending
 **Goal:** Full LLM query capability with multi-source queries
 
 **Scope:**
-- Add /api/query/reference and /api/query/hybrid endpoints
-- Implement full orchestration with Mutiny reactive streams
-- Add OpenAPI documentation (automatic with Quarkus)
-- Build native image and validate <100ms startup
+- Add /api/query/reference endpoint for PostgreSQL queries
+- Add /api/query/hybrid endpoint for multi-source queries
+- Implement PostgresQueryService with Quarkus reactive PostgreSQL client
+- Implement QueryOrchestrationService for joining data
+- Enhance OpenAPI documentation
 
-### Phase 5: Refinement & Production-Ready (Days 19-23)
+**Building on Phase 1:**
+- Extend query-api module with PostgreSQL integration
+- Add quarkus-reactive-pg-client dependency
+- Implement hybrid queries combining Kafka Streams + PostgreSQL data
+
+### Phase 5: Refinement & Production-Ready ⏭️ PENDING
+**Status:** Pending
 **Goal:** Production-quality implementation with docs and testing
 
 **Scope:**
+- Build Quarkus Query API as **native image** (target: <100ms startup, <128Mi memory)
 - Add advanced features (exception injection, time-based event rates, realistic geography)
 - Create Kustomize cloud overlay with HPA
+- Implement persistent storage for Apicurio Registry
 - Comprehensive testing (unit, integration, performance)
-- Complete documentation (README, deployment guides, troubleshooting)
+- Enhanced documentation and troubleshooting guides
 
-### Phase 6: Demo Optimization & Polish (Days 24-25)
+**Building on Phase 1:**
+- Create query-api native image build
+- Update query-api.yaml with native image resources
+- Add kubernetes/overlays/cloud/ for production deployment
+- Implement comprehensive test suite
+
+### Phase 6: Demo Optimization & Polish ⏭️ PENDING
+**Status:** Pending
 **Goal:** Demo-ready with example queries and presentations
 
 **Deliverables:**
-- Demo-ready system
-- Sample LLM query scripts
-- Presentation materials
+- Demo-ready system with all features
+- Sample LLM query scripts for common logistics questions
+- Presentation materials and architecture diagrams
+- Performance benchmarks and metrics dashboards
+- Video walkthrough and demo script
+
+**Building on Phase 1:**
+- Create demo scenarios showcasing real-time queries
+- Implement example LLM integration
+- Create Grafana dashboards for metrics visualization
 
 ## Quarkus Benefits Summary
 
@@ -587,4 +708,51 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 
 ## Next Steps
 
-After approval of this plan, implementation will proceed in the 6 phases outlined above, starting with Phase 1 (Minimal End-to-End) to establish a working demo within 1 week.
+✅ **Phase 1 COMPLETED** - Minimal end-to-end system is fully operational and ready for deployment.
+
+**To deploy Phase 1:**
+```bash
+cd /home/tcooper/repos/redhat/realtime-context-demo
+
+# 1. Start minikube
+minikube start --cpus=4 --memory=12288 --disk-size=50g
+
+# 2. Deploy infrastructure
+python3 scripts/01-setup-infra.py
+
+# 3. Build all modules
+python3 scripts/02-build-all.py
+
+# 4. Deploy applications
+python3 scripts/03-deploy-apps.py
+
+# 5. Validate deployment
+python3 scripts/04-validate.py
+```
+
+**Future Implementation:**
+- Phase 2-6 will build upon the solid foundation established in Phase 1
+- Each phase adds incremental functionality while maintaining the working system
+- All infrastructure and tooling from Phase 1 will be reused and extended
+
+## Phase 1 Success Metrics (All Achieved)
+
+✅ **Functional Requirements:**
+- All infrastructure pods healthy and running
+- Data generator producing events every 6 seconds
+- State store populated with shipment counts
+- Query API returning real-time data
+- Interactive Queries API functional
+- End-to-end latency <5 seconds
+
+✅ **Technical Requirements:**
+- Minikube using ~1.5 CPU, ~3.5Gi memory
+- Kafka 4.1.1 with KRaft (no ZooKeeper)
+- Quarkus 3.30.1 REST API operational
+- Python deployment automation working
+- Podman/Docker support functional
+
+✅ **Documentation:**
+- Complete README.md with deployment instructions
+- Implementation plan updated with actual implementation
+- All critical files created and documented

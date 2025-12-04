@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.smartship</groupId>
+    <artifactId>realtime-context-demo</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>SmartShip Logistics :: Parent</name>
+    <description>Real-time event streaming demo for logistics with Kafka, Kafka Streams, and Quarkus</description>
+
+    <properties>
+        <!-- Build properties -->
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Dependency versions -->
+        <kafka.version>4.1.1</kafka.version>
+        <avro.version>1.12.1</avro.version>
+        <apicurio.version>3.1.4</apicurio.version>
+        <quarkus.version>3.30.1</quarkus.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <logback.version>1.5.12</logback.version>
+        <jib.version>3.5.1</jib.version>
+
+        <!-- Docker/Podman image configuration -->
+        <docker.registry>smartship</docker.registry>
+        <docker.tag>latest</docker.tag>
+    </properties>
+
+    <modules>
+        <module>schemas</module>
+        <module>common</module>
+        <module>database</module>
+        <module>data-generators</module>
+        <module>streams-processor</module>
+        <module>query-api</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Quarkus BOM -->
+            <dependency>
+                <groupId>io.quarkus.platform</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Kafka -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-streams</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+
+            <!-- Avro -->
+            <dependency>
+                <groupId>org.apache.avro</groupId>
+                <artifactId>avro</artifactId>
+                <version>${avro.version}</version>
+            </dependency>
+
+            <!-- Apicurio Registry -->
+            <dependency>
+                <groupId>io.apicurio</groupId>
+                <artifactId>apicurio-registry-avro-serde-kafka</artifactId>
+                <version>${apicurio.version}</version>
+            </dependency>
+
+            <!-- Logging -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+
+            <!-- Internal modules -->
+            <dependency>
+                <groupId>com.smartship</groupId>
+                <artifactId>schemas</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.smartship</groupId>
+                <artifactId>common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Maven Compiler Plugin -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <source>${maven.compiler.source}</source>
+                        <target>${maven.compiler.target}</target>
+                        <encoding>${project.build.sourceEncoding}</encoding>
+                    </configuration>
+                </plugin>
+
+                <!-- Avro Maven Plugin -->
+                <plugin>
+                    <groupId>org.apache.avro</groupId>
+                    <artifactId>avro-maven-plugin</artifactId>
+                    <version>${avro.version}</version>
+                </plugin>
+
+                <!-- Jib Maven Plugin for container images -->
+                <plugin>
+                    <groupId>com.google.cloud.tools</groupId>
+                    <artifactId>jib-maven-plugin</artifactId>
+                    <version>${jib.version}</version>
+                    <configuration>
+                        <from>
+                            <image>eclipse-temurin:25-jdk-ubi10-minimal</image>
+                        </from>
+                        <to>
+                            <image>${docker.registry}/${project.artifactId}:${docker.tag}</image>
+                        </to>
+                        <container>
+                            <jvmFlags>
+                                <jvmFlag>-XX:+UseContainerSupport</jvmFlag>
+                                <jvmFlag>-XX:MaxRAMPercentage=75.0</jvmFlag>
+                            </jvmFlags>
+                        </container>
+                    </configuration>
+                </plugin>
+
+                <!-- Maven Surefire Plugin for tests -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.2</version>
+                </plugin>
+
+                <!-- Maven Failsafe Plugin for integration tests -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>3.5.2</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.smartship</groupId>
+        <artifactId>realtime-context-demo</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>streams-processor</artifactId>
+    <name>SmartShip Logistics :: Streams Processor</name>
+    <description>Kafka Streams application with materialized views</description>
+
+    <dependencies>
+        <!-- Schemas -->
+        <dependency>
+            <groupId>com.smartship</groupId>
+            <artifactId>schemas</artifactId>
+        </dependency>
+
+        <!-- Common -->
+        <dependency>
+            <groupId>com.smartship</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+
+        <!-- Kafka Streams -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-streams</artifactId>
+        </dependency>
+
+        <!-- Apicurio Registry -->
+        <dependency>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-avro-serde-kafka</artifactId>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+        </dependency>
+
+        <!-- Embedded HTTP server for Interactive Queries -->
+        <dependency>
+            <groupId>com.sun.net.httpserver</groupId>
+            <artifactId>http</artifactId>
+            <version>20070405</version>
+            <scope>system</scope>
+            <systemPath>${java.home}/lib/jrt-fs.jar</systemPath>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- JAR with dependencies for execution -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.smartship.streams.StreamsApplication</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- Jib for container image -->
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <configuration>
+                    <container>
+                        <mainClass>com.smartship.streams.StreamsApplication</mainClass>
+                        <ports>
+                            <port>7070</port>
+                        </ports>
+                    </container>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

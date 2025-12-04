@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smartship
+  labels:
+    name: smartship
+    app: smartship-logistics
