@@ -51,14 +51,20 @@ The Quarkus query-api requires specific configuration in `query-api/src/main/res
 - `quarkus-smallrye-openapi` - OpenAPI/Swagger documentation
 - `quarkus-smallrye-health` - Health checks for Kubernetes probes
 - `quarkus-container-image-jib` - Container image building
+- `quarkus-cache` - Instance metadata caching for multi-instance discovery
 
 **Critical Properties:**
 ```properties
 # Java 25 base image for container builds
 quarkus.jib.base-jvm-image=eclipse-temurin:25-jdk-ubi10-minimal
 
-# Streams processor connection
-streams-processor.url=http://streams-processor.smartship.svc.cluster.local:7070
+# Streams processor connection (multi-instance support)
+streams-processor.headless-service=streams-processor-headless.smartship.svc.cluster.local
+streams-processor.port=7070
+
+# Instance discovery cache
+quarkus.cache.caffeine.streams-instances.expire-after-write=30S
+quarkus.cache.caffeine.streams-instances.maximum-size=10
 ```
 
 ### Kafka Streams State Store Pattern
@@ -68,6 +74,33 @@ The streams processor (`streams-processor/`) creates materialized KTables that a
 3. **Query API** (`query-api/`): Quarkus REST service that calls the Interactive Query Server
 
 **Important:** State stores are named constants (e.g., `STATE_STORE_NAME = "active-shipments-by-status"`). Use these constants when adding new query endpoints.
+
+### Multi-Instance Streams Processor Architecture
+The streams-processor supports horizontal scaling with distributed state store queries:
+
+```
+Query-API → Instance Discovery → [Pod-0, Pod-1, Pod-2]
+         ↓
+    - Specific Key Query → metadataForKey() → Route to Single Pod
+    - Aggregate Query → allMetadataForStore() → Query All Pods (parallel) → Merge Results
+```
+
+**Key Components:**
+- **StatefulSet** (`kubernetes/applications/streams-processor.yaml`): Provides stable network identities for each pod
+- **Headless Service** (`streams-processor-headless`): Enables direct pod addressing via DNS
+- **StreamsInstanceDiscoveryService** (`query-api/.../services/StreamsInstanceDiscoveryService.java`): Discovers instances via DNS resolution
+- **StreamsMetadata Endpoints** (`/metadata/instances/{storeName}`, `/metadata/instance-for-key/{storeName}/{key}`)
+
+**Environment Variables (StatefulSet):**
+- `POD_NAME`: Injected from `metadata.name` for stable identity
+- `APPLICATION_SERVER`: Set to `$(POD_NAME).streams-processor-headless.smartship.svc.cluster.local:7070`
+
+**Instance Discovery Flow:**
+1. Query-API resolves headless service DNS → gets all pod IPs
+2. Health checks each instance (`/health` endpoint)
+3. Randomly selects from healthy instances for metadata queries
+4. Uses `metadataForKey()` to route specific key queries to correct instance
+5. Uses parallel queries with `CompletableFuture` for aggregate queries across all instances
 
 ## Build Commands
 
@@ -142,9 +175,11 @@ python3 scripts/05-cleanup.py
 
 **Script Architecture:** All scripts import `scripts/common.py` which provides:
 - `kubectl()` - kubectl wrapper
-- `wait_for_condition()` - wait for K8s resource readiness
+- `wait_for_condition()` - wait for K8s resource readiness (Deployments)
+- `wait_for_statefulset_ready()` - wait for StatefulSet pods to be ready
 - `setup_container_runtime()` - podman/docker detection
 - `get_minikube_env()` - container runtime environment setup
+- `verify_kafka_data_flow()` - verify Kafka topic data flow
 
 ## Working with Avro Schemas
 
@@ -194,7 +229,10 @@ Deploy with: `kubectl apply -k kubernetes/overlays/minikube`
 ```bash
 kubectl get pods -n smartship
 # Expected: events-cluster-dual-role-0, apicurio-registry-*, postgresql-0,
-#           data-generators-*, streams-processor-*, query-api-*
+#           data-generators-*, streams-processor-0 (StatefulSet), query-api-*
+
+# Check StatefulSet specifically
+kubectl get statefulset -n smartship
 ```
 
 ### Monitor Event Generation
@@ -211,6 +249,25 @@ curl http://localhost:7070/state/active-shipments-by-status/IN_TRANSIT | jq
 
 # Get all status counts
 curl http://localhost:7070/state/active-shipments-by-status | jq
+
+# Query StreamsMetadata (multi-instance support)
+curl http://localhost:7070/metadata/instances/active-shipments-by-status | jq
+curl http://localhost:7070/metadata/instance-for-key/active-shipments-by-status/IN_TRANSIT | jq
+```
+
+### Validate StatefulSet Configuration
+```bash
+# Check StatefulSet status
+kubectl get statefulset streams-processor -n smartship
+
+# Verify headless service (clusterIP should be None)
+kubectl get svc streams-processor-headless -n smartship -o jsonpath='{.spec.clusterIP}'
+
+# Check APPLICATION_SERVER env var in pod
+kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
+
+# Scale streams-processor (for multi-instance testing)
+kubectl scale statefulset streams-processor -n smartship --replicas=3
 ```
 
 ### Query via REST API
@@ -306,7 +363,7 @@ kubectl get kafka events-cluster -n smartship -o yaml
 ### State Store Empty or Null Values
 The Kafka Streams processor needs time to consume events and populate state stores. Wait 10-30 seconds after deployment, then check:
 ```bash
-kubectl logs deployment/streams-processor -n smartship | grep "Updated count"
+kubectl logs statefulset/streams-processor -n smartship | grep "Updated count"
 ```
 
 ### Avro Serialization Errors

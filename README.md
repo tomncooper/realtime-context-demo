@@ -4,8 +4,8 @@ A real-time event streaming demonstration for a regional logistics and fulfillme
 
 ## Phase 1: Minimal End-to-End Implementation
 
-**Status:** ✅ Complete
-**Goal:** Working vertical slice with 1 topic, 1 state store, and basic query capability
+**Status:** ✅ Complete (with multi-instance support)
+**Goal:** Working vertical slice with 1 topic, 1 state store, basic query capability, and horizontal scaling
 
 ## 🏗️ Architecture
 
@@ -25,10 +25,13 @@ A real-time event streaming demonstration for a regional logistics and fulfillme
          ┌─────────────────────┐
          │ Kafka Streams       │
          │ Processor           │
+         │ (StatefulSet)       │
          │                     │
          │ State Store:        │
          │ active-shipments-   │
          │  by-status          │
+         │                     │
+         │ Pods: 0, 1, 2...    │
          └─────────┬───────────┘
                    │
                    ▼
@@ -36,8 +39,9 @@ A real-time event streaming demonstration for a regional logistics and fulfillme
          │ Query API       │
          │ (Quarkus)       │
          │                 │
-         │ GET /shipments/ │
-         │  by-status      │
+         │ Instance        │
+         │ Discovery →     │
+         │ Parallel Queries│
          └─────────────────┘
 ```
 
@@ -142,8 +146,13 @@ Expected output:
 - `apicurio-registry-...` - Schema registry
 - `postgresql-0` - Database
 - `data-generators-...` - Event producer
-- `streams-processor-...` - Kafka Streams app
+- `streams-processor-0` - Kafka Streams app (StatefulSet)
 - `query-api-...` - REST API
+
+```bash
+# Check StatefulSet status
+kubectl get statefulset -n smartship
+```
 
 ### Monitor Event Generation
 ```bash
@@ -159,6 +168,22 @@ curl http://localhost:7070/state/active-shipments-by-status/IN_TRANSIT | jq
 
 # Get all status counts
 curl http://localhost:7070/state/active-shipments-by-status | jq
+
+# Query StreamsMetadata (multi-instance support)
+curl http://localhost:7070/metadata/instances/active-shipments-by-status | jq
+curl http://localhost:7070/metadata/instance-for-key/active-shipments-by-status/IN_TRANSIT | jq
+```
+
+### Scale Streams Processor (Multi-Instance)
+```bash
+# Scale to 3 replicas
+kubectl scale statefulset streams-processor -n smartship --replicas=3
+
+# Verify all pods are ready
+kubectl get pods -l app=streams-processor -n smartship
+
+# Check APPLICATION_SERVER env var
+kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 ```
 
 ### Query via REST API
@@ -201,14 +226,20 @@ psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
    - Random warehouse selection from 5 European locations
    - Events published to `shipment.events` Kafka topic
 
-2. **Kafka Streams Processor** consumes events and maintains state
+2. **Kafka Streams Processor** (StatefulSet) consumes events and maintains state
    - Groups events by status
    - Counts shipments per status
    - Stores in materialized view: `active-shipments-by-status`
    - Exposes Interactive Queries API on port 7070
+   - Supports horizontal scaling with state partitioning
+   - Each pod has stable identity via headless service
 
-3. **Query API** provides REST endpoints
-   - Queries Kafka Streams state stores
+3. **Query API** provides REST endpoints with multi-instance support
+   - Discovers streams-processor instances via DNS
+   - Routes specific key queries to correct instance
+   - Aggregates results from all instances for aggregate queries
+   - Uses parallel queries with CompletableFuture
+   - Caches instance metadata for 30 seconds
    - Returns JSON responses
    - OpenAPI documentation available
 
@@ -228,17 +259,24 @@ realtime-context-demo/
 │   └── schema/init.sql
 ├── data-generators/                 # Event producers
 │   └── src/main/java/.../ShipmentEventGenerator.java
-├── streams-processor/               # Kafka Streams
+├── streams-processor/               # Kafka Streams (StatefulSet)
 │   └── src/main/java/com/smartship/streams/
 │       ├── LogisticsTopology.java
 │       ├── StreamsApplication.java
-│       └── InteractiveQueryServer.java
+│       ├── InteractiveQueryServer.java
+│       └── StreamsMetadataResponse.java
 ├── query-api/                       # Quarkus REST API
 │   └── src/main/java/com/smartship/api/
 │       ├── QueryResource.java
-│       └── KafkaStreamsQueryService.java
+│       ├── KafkaStreamsQueryService.java
+│       ├── model/StreamsInstanceMetadata.java
+│       └── services/StreamsInstanceDiscoveryService.java
 ├── kubernetes/                      # K8s manifests
 │   ├── base/
+│   ├── applications/                # Application manifests
+│   │   ├── data-generators.yaml
+│   │   ├── streams-processor.yaml   # StatefulSet + Headless Service
+│   │   └── query-api.yaml
 │   └── overlays/minikube/
 └── scripts/                         # Python automation
     ├── common.py
@@ -335,6 +373,13 @@ Not recommended for Phase 1 - requires manual Kafka, Apicurio, and PostgreSQL se
 
 ## 📚 Next Steps (Future Phases)
 
+**Phase 1 Complete Features:**
+- ✅ Multi-instance streams-processor support (StatefulSet + headless service)
+- ✅ StreamsMetadata endpoints for instance discovery
+- ✅ Parallel query aggregation across instances
+- ✅ DNS-based instance discovery with health checks
+
+**Upcoming Phases:**
 - **Phase 2:** Add vehicle telemetry, warehouse operations, and order status topics
 - **Phase 3:** Implement all 6 state stores with windowed aggregations
 - **Phase 4:** Complete Query API with multi-source hybrid queries

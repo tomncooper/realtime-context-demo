@@ -28,12 +28,20 @@ public class StreamsApplication {
         // Build topology
         Topology topology = LogisticsTopology.build();
 
+        // Get application.server from environment variable for Interactive Queries
+        String applicationServer = System.getenv("APPLICATION_SERVER");
+
         // Configure Streams
-        Properties props = KafkaConfig.createStreamsConfig(APPLICATION_ID);
+        Properties props = KafkaConfig.createStreamsConfig(APPLICATION_ID, applicationServer);
         LOG.info("Streams configuration:");
         LOG.info("  Application ID: {}", APPLICATION_ID);
         LOG.info("  Bootstrap Servers: {}", KafkaConfig.getBootstrapServers());
         LOG.info("  Apicurio Registry: {}", KafkaConfig.getApicurioRegistryUrl());
+        if (applicationServer != null && !applicationServer.isEmpty()) {
+            LOG.info("  Application Server: {}", applicationServer);
+        } else {
+            LOG.warn("  Application Server: NOT SET (Interactive Queries will not work for multi-instance deployments)");
+        }
 
         // Create Streams instance
         final KafkaStreams streams = new KafkaStreams(topology, props);

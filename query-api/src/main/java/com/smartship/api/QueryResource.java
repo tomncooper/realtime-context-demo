@@ -8,6 +8,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -58,10 +59,12 @@ public class QueryResource {
 
         try {
             Map<String, Object> counts = streamsQuery.getAllStatusCounts();
-            counts.put("timestamp", System.currentTimeMillis());
-            counts.put("source", "kafka-streams");
+            Map<String, Object> response = new HashMap<>();
+            response.put("counts", counts);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
 
-            return Response.ok(counts).build();
+            return Response.ok(response).build();
 
         } catch (Exception e) {
             LOG.error("Error querying all status counts", e);

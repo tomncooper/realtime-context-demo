@@ -86,6 +86,17 @@ public class KafkaConfig {
      * @return Streams properties
      */
     public static Properties createStreamsConfig(String applicationId) {
+        return createStreamsConfig(applicationId, null);
+    }
+
+    /**
+     * Create Kafka Streams configuration with optional application server.
+     *
+     * @param applicationId Streams application identifier
+     * @param applicationServer Optional application server (host:port) for Interactive Queries
+     * @return Streams properties
+     */
+    public static Properties createStreamsConfig(String applicationId, String applicationServer) {
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
@@ -99,6 +110,11 @@ public class KafkaConfig {
         props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
         props.put(StreamsConfig.STATE_DIR_CONFIG, "/tmp/kafka-streams/" + applicationId);
         props.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 10 * 1024 * 1024L); // 10MB cache
+
+        // Set application.server for Interactive Queries if provided
+        if (applicationServer != null && !applicationServer.isEmpty()) {
+            props.put(StreamsConfig.APPLICATION_SERVER_CONFIG, applicationServer);
+        }
 
         return props;
     }

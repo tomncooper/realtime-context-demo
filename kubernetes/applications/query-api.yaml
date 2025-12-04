@@ -23,8 +23,10 @@ spec:
             - containerPort: 8080
               name: http
           env:
-            - name: STREAMS_PROCESSOR_URL
-              value: "http://streams-processor.smartship.svc.cluster.local:7070"
+            - name: STREAMS_PROCESSOR_HEADLESS_SERVICE
+              value: "streams-processor-headless.smartship.svc.cluster.local"
+            - name: STREAMS_PROCESSOR_PORT
+              value: "7070"
           resources:
             requests:
               memory: "512Mi"

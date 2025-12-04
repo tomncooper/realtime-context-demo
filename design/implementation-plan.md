@@ -109,6 +109,21 @@ realtime-context-demo/
 ### 4. Kafka Streams Processor
 **Purpose:** Build 6 real-time materialized views (state stores)
 
+**Deployment:** StatefulSet with headless service for multi-instance support
+
+**Multi-Instance Architecture:**
+```
+Query-API → Instance Discovery → [Pod-0, Pod-1, Pod-2]
+         ↓
+    - Specific Key Query → metadataForKey() → Route to Single Pod
+    - Aggregate Query → allMetadataForStore() → Query All Pods (parallel) → Merge
+```
+
+**Key Configuration:**
+- `APPLICATION_SERVER`: Set via environment variable to `$(POD_NAME).streams-processor-headless.smartship.svc.cluster.local:7070`
+- Headless service enables DNS-based pod discovery
+- StreamsMetadata endpoints expose instance information
+
 **Topology:**
 ```
 Kafka Topics → Stream Processing → State Stores
@@ -158,8 +173,19 @@ Kafka Topics → Stream Processing → State Stores
 - Interactive Queries enabled (HTTP server on port 7070)
 - Exactly-once semantics
 - Automatic state recovery from changelog topics
+- Multi-instance support via StreamsMetadata API
 
-**Critical file:** `streams-processor/src/main/java/com/smartship/streams/topology/LogisticsTopology.java`
+**Interactive Query Endpoints:**
+- `GET /state/{storeName}` - Query all entries in a state store
+- `GET /state/{storeName}/{key}` - Query specific key in state store
+- `GET /metadata/instances/{storeName}` - Get all instances hosting a state store
+- `GET /metadata/instance-for-key/{storeName}/{key}` - Get instance hosting a specific key
+- `GET /health` - Health check endpoint
+
+**Critical files:**
+- `streams-processor/src/main/java/com/smartship/streams/topology/LogisticsTopology.java`
+- `streams-processor/src/main/java/com/smartship/streams/InteractiveQueryServer.java`
+- `streams-processor/src/main/java/com/smartship/streams/StreamsMetadataResponse.java`
 
 ### 5. Query API (Quarkus)
 **Purpose:** REST API for LLM to query real-time and reference data
@@ -173,17 +199,25 @@ Kafka Topics → Stream Processing → State Stores
 - ✓ **Developer joy:** Live reload, dev services, unified config
 - ✓ **Native compilation:** GraalVM for minimal container images
 
-**Three service layers:**
+**Service Layers:**
 
-1. **KafkaStreamsQueryService**
+1. **StreamsInstanceDiscoveryService** (Multi-Instance Support)
+   - Discovers streams-processor instances via headless service DNS
+   - Health checks instances and randomly selects from healthy ones
+   - Caches instance metadata for 30 seconds (Quarkus Cache)
+   - Uses `InetAddress.getAllByName()` for DNS resolution
+
+2. **KafkaStreamsQueryService**
    - HTTP client to Kafka Streams Interactive Queries (port 7070)
    - Queries all 6 state stores
+   - Routes specific key queries to correct instance via `metadataForKey()`
+   - Aggregates results from all instances using parallel `CompletableFuture` queries
 
-2. **PostgresQueryService**
+3. **PostgresQueryService**
    - Quarkus Reactive PostgreSQL client (Mutiny)
    - Queries 6 reference tables: customers, warehouses, vehicles, products, drivers, routes
 
-3. **QueryOrchestrationService**
+4. **QueryOrchestrationService**
    - Routes queries to appropriate service(s)
    - Joins data from multiple sources
    - Formats responses for LLM
@@ -231,6 +265,11 @@ Query: "Which shipments for ACME Corp are currently delayed?"
     <groupId>io.quarkus</groupId>
     <artifactId>quarkus-container-image-jib</artifactId>
   </dependency>
+  <dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-cache</artifactId>
+    <!-- Required for instance discovery caching -->
+  </dependency>
 </dependencies>
 ```
 
@@ -243,8 +282,13 @@ The Query API requires specific configuration in `query-api/src/main/resources/a
 # CRITICAL: Without this, container will use default Java 21 image causing UnsupportedClassVersionError
 quarkus.jib.base-jvm-image=eclipse-temurin:25-jdk-ubi10-minimal
 
-# Streams processor connection
-streams-processor.url=http://streams-processor.smartship.svc.cluster.local:7070
+# Streams processor connection (multi-instance support)
+streams-processor.headless-service=streams-processor-headless.smartship.svc.cluster.local
+streams-processor.port=7070
+
+# Instance discovery cache (30 second TTL)
+quarkus.cache.caffeine.streams-instances.expire-after-write=30S
+quarkus.cache.caffeine.streams-instances.maximum-size=10
 
 # Container image configuration
 quarkus.container-image.group=smartship
@@ -256,6 +300,8 @@ quarkus.container-image.builder=jib
 **Why these configurations matter:**
 - **Base image**: Compiled Java 25 code requires Java 25 runtime. Default Quarkus base images use Java 21.
 - **Health extension**: Without `quarkus-smallrye-health`, Kubernetes probes fail with HTTP 404, causing pod restarts.
+- **Headless service**: Enables DNS-based discovery of all streams-processor instances.
+- **Cache**: Reduces overhead by caching instance metadata for 30 seconds.
 
 ### 6. PostgreSQL Database
 **Purpose:** Store reference data (200 customers, 5 warehouses, 50 vehicles, 10K products, 75 drivers, 100 routes)
@@ -312,7 +358,11 @@ kubernetes/
 │   ├── apicurio-registry.yaml      # Deployment + Service
 │   ├── postgresql.yaml             # StatefulSet + Service + ConfigMap
 │   ├── data-generators.yaml        # Deployment
-│   ├── streams-processor.yaml      # Deployment + Service
+│   ├── streams-processor.yaml      # StatefulSet + Headless Service + ClusterIP Service
+│   └── query-api.yaml              # Deployment + Service
+├── applications/                   # Application manifests (deployed separately)
+│   ├── data-generators.yaml        # Deployment
+│   ├── streams-processor.yaml      # StatefulSet + Headless Service
 │   └── query-api.yaml              # Deployment + Service
 └── overlays/
     ├── minikube/                   # Laptop-friendly (✅ Phase 1)
@@ -347,7 +397,7 @@ kubectl apply -k kubernetes/overlays/cloud
 
 **Phase 4: Applications**
 8. ✅ Data Generators Deployment (1 generator: ShipmentEventGenerator)
-9. ✅ Streams Processor Deployment + Service (port 7070)
+9. ✅ Streams Processor StatefulSet + Headless Service + ClusterIP Service (port 7070)
 10. ✅ Query API Deployment + Service (port 8080)
 
 ### Resource Allocation (✅ Phase 1 Implemented)
@@ -364,7 +414,7 @@ kubectl apply -k kubernetes/overlays/cloud
 | Apicurio Registry | 150m | 300m | 256Mi | 512Mi | 1 | ✅ |
 | PostgreSQL | 200m | 400m | 256Mi | 512Mi | 1 | ✅ |
 | Data Generators | 150m | 300m | 256Mi | 512Mi | 1 | ✅ |
-| Streams Processor | 400m | 800m | 768Mi | 1536Mi | 1 | ✅ |
+| Streams Processor (StatefulSet) | 400m | 800m | 768Mi | 1536Mi | 1-3 | ✅ |
 | Query API (JVM) | 200m | 400m | 256Mi | 512Mi | 1 | ✅ Phase 1 |
 | Query API (native) | 100m | 250m | 64Mi | 128Mi | 1 | ⏭️ Phase 5 |
 
@@ -416,10 +466,15 @@ python3 scripts/05-cleanup.py
 
 **Python Scripts:**
 - ✅ `scripts/common.py` - Shared utilities with podman/docker support
+  - `kubectl()` - kubectl wrapper
+  - `wait_for_condition()` - wait for Deployment conditions
+  - `wait_for_statefulset_ready()` - wait for StatefulSet pods
+  - `verify_kafka_data_flow()` - verify Kafka topic data flow
+  - `setup_container_runtime()` - podman/docker detection
 - ✅ `scripts/01-setup-infra.py` - Infrastructure deployment
 - ✅ `scripts/02-build-all.py` - Build all modules and images
-- ✅ `scripts/03-deploy-apps.py` - Deploy applications
-- ✅ `scripts/04-validate.py` - End-to-end validation
+- ✅ `scripts/03-deploy-apps.py` - Deploy applications (handles StatefulSet migration)
+- ✅ `scripts/04-validate.py` - End-to-end validation (includes metadata endpoints)
 - ✅ `scripts/05-cleanup.py` - Cleanup deployment
 
 ### Build Commands (✅ Phase 1 Implemented)
@@ -547,6 +602,13 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 13. ✅ Fixed Java version compatibility issues (UnsupportedClassVersionError)
 14. ✅ Deployed all components to minikube
 15. ✅ Validated end-to-end: generator → Kafka → Streams → Query API
+16. ✅ Implemented multi-instance streams-processor support:
+    - Converted Deployment to StatefulSet with headless service
+    - Added StreamsMetadata endpoints (`/metadata/instances`, `/metadata/instance-for-key`)
+    - Implemented StreamsInstanceDiscoveryService with DNS-based pod discovery
+    - Added parallel query aggregation with CompletableFuture
+    - Added quarkus-cache for instance metadata caching
+    - Updated deployment scripts for StatefulSet handling
 
 **Deliverables (Achieved):**
 - ✅ Full stack running on minikube (~1.5 CPU, ~3.5Gi memory)
@@ -557,6 +619,8 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 - ✅ REST API with OpenAPI/Swagger UI on port 8080
 - ✅ Complete README.md with deployment instructions
 - ✅ Can query: "Show all IN_TRANSIT shipments" and get live counts
+- ✅ Multi-instance streams-processor support with horizontal scaling capability
+- ✅ StreamsMetadata endpoints for instance discovery
 
 **Key Implementation Decisions:**
 - Used **Kafka 4.1.1 with KRaft** instead of ZooKeeper (saves ~400Mi memory)
@@ -569,6 +633,10 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 - Configured **Quarkus Jib base image** explicitly to match Java 25 compilation target
 - Used **in-memory Apicurio Registry** for simplicity (persistent storage in later phases)
 - Updated to **Apicurio Registry 3.1.4** for improved compatibility
+- Used **StatefulSet with headless service** for streams-processor (enables stable network identities)
+- Implemented **DNS-based instance discovery** via `InetAddress.getAllByName()` with random selection
+- Used **Quarkus Cache** for instance metadata caching (30-second TTL)
+- Implemented **parallel query aggregation** with `CompletableFuture` for multi-instance queries
 
 ### Phase 2: Add Remaining Topics & Generators ⏭️ PENDING
 **Status:** Pending
@@ -702,9 +770,14 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 2. **schemas/src/main/avro/shipment-event.avsc** - Core Avro schema (+ 3 others)
 3. **data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java** - Central coordinator
 4. **streams-processor/src/main/java/com/smartship/streams/topology/LogisticsTopology.java** - Kafka Streams topology
-5. **query-api/src/main/java/com/smartship/api/QueryResource.java** - Quarkus JAX-RS endpoint
-6. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
-7. **database/schema/init.sql** - PostgreSQL DDL
+5. **streams-processor/src/main/java/com/smartship/streams/InteractiveQueryServer.java** - Interactive Queries HTTP server
+6. **streams-processor/src/main/java/com/smartship/streams/StreamsMetadataResponse.java** - StreamsMetadata DTO
+7. **query-api/src/main/java/com/smartship/api/QueryResource.java** - Quarkus JAX-RS endpoint
+8. **query-api/src/main/java/com/smartship/api/services/StreamsInstanceDiscoveryService.java** - Instance discovery
+9. **query-api/src/main/java/com/smartship/api/model/StreamsInstanceMetadata.java** - Instance metadata DTO
+10. **kubernetes/applications/streams-processor.yaml** - StatefulSet + Headless Service
+11. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
+12. **database/schema/init.sql** - PostgreSQL DDL
 
 ## Next Steps
 
@@ -744,6 +817,8 @@ python3 scripts/04-validate.py
 - Query API returning real-time data
 - Interactive Queries API functional
 - End-to-end latency <5 seconds
+- Multi-instance streams-processor support operational
+- StreamsMetadata endpoints functional
 
 ✅ **Technical Requirements:**
 - Minikube using ~1.5 CPU, ~3.5Gi memory
@@ -751,6 +826,9 @@ python3 scripts/04-validate.py
 - Quarkus 3.30.1 REST API operational
 - Python deployment automation working
 - Podman/Docker support functional
+- StatefulSet with headless service for streams-processor
+- DNS-based instance discovery with health checks
+- Parallel query aggregation with CompletableFuture
 
 ✅ **Documentation:**
 - Complete README.md with deployment instructions

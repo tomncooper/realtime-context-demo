@@ -3,6 +3,7 @@
 import sys
 import time
 import subprocess
+
 from common import (
     kubectl,
     run_command,
@@ -10,6 +11,7 @@ from common import (
     NAMESPACE,
     KAFKA_CLUSTER_NAME
 )
+
 
 def port_forward_and_test(service: str, port: int, test_func):
     """Start port-forward and run test function."""
@@ -27,23 +29,88 @@ def port_forward_and_test(service: str, port: int, test_func):
         proc.terminate()
         proc.wait()
 
+
 def test_state_store():
     """Test Kafka Streams state store."""
-    result = run_command(
+    run_command(
         ['curl', '-s', 'http://localhost:7070/state/active-shipments-by-status/IN_TRANSIT'],
         capture_output=True
     )
-    print(result.stdout)
+
+
+def test_metadata_endpoints():
+    """Test Kafka Streams metadata endpoints (for multi-instance support)."""
+    print("\n--- Testing metadata endpoints ---")
+
+    # Test /metadata/instances endpoint
+    print("\nQuerying all instances for state store:")
+    run_command(
+        ['curl', '-s', 'http://localhost:7070/metadata/instances/active-shipments-by-status'],
+        capture_output=True
+    )
+
+    # Test /metadata/instance-for-key endpoint
+    print("\nQuerying instance for key 'IN_TRANSIT':")
+    run_command(
+        ['curl', '-s', 'http://localhost:7070/metadata/instance-for-key/active-shipments-by-status/IN_TRANSIT'],
+        capture_output=True
+    )
+
 
 def test_query_api():
     """Test Query API endpoints."""
     for status in ['CREATED', 'IN_TRANSIT', 'DELIVERED']:
         print(f"\nQuerying status: {status}")
-        result = run_command(
+        run_command(
             ['curl', '-s', f'http://localhost:8080/api/shipments/by-status/{status}'],
             capture_output=True
         )
-        print(result.stdout)
+
+    # Test aggregated query (all statuses)
+    print("\nQuerying all statuses (aggregated):")
+    run_command(
+        ['curl', '-s', 'http://localhost:8080/api/shipments/status/all'],
+        capture_output=True
+    )
+
+
+def validate_statefulset():
+    """Validate StatefulSet configuration for streams-processor."""
+    print("\n=== Validating Streams Processor StatefulSet ===")
+
+    # Check StatefulSet status
+    result = run_command([
+        'kubectl', 'get', 'statefulset', 'streams-processor', '-n', NAMESPACE,
+        '-o', 'jsonpath={.status.readyReplicas}/{.spec.replicas}'
+    ], capture_output=True)
+    print(f"StatefulSet replicas ready: {result.stdout.strip()}")
+
+    # Check headless service exists
+    print("\nChecking headless service:")
+    result = run_command([
+        'kubectl', 'get', 'svc', 'streams-processor-headless', '-n', NAMESPACE,
+        '-o', 'jsonpath={.spec.clusterIP}'
+    ], capture_output=True, check=False)
+    if result.returncode == 0:
+        cluster_ip = result.stdout.strip()
+        if cluster_ip == 'None':
+            print("✓ Headless service configured correctly (clusterIP: None)")
+        else:
+            print(f"✗ Headless service has unexpected clusterIP: {cluster_ip}")
+    else:
+        print("✗ Headless service not found")
+
+    # Check APPLICATION_SERVER environment variable
+    print("\nChecking APPLICATION_SERVER env var in pod:")
+    result = run_command([
+        'kubectl', 'exec', 'streams-processor-0', '-n', NAMESPACE, '--',
+        'printenv', 'APPLICATION_SERVER'
+    ], capture_output=True, check=False)
+    if result.returncode == 0:
+        print(f"✓ APPLICATION_SERVER: {result.stdout.strip()}")
+    else:
+        print("✗ APPLICATION_SERVER not set")
+
 
 def main():
     print("=" * 60)
@@ -67,8 +134,14 @@ def main():
     print("\n=== Verifying Kafka Data Flow ===")
     verify_kafka_data_flow('shipment.events', max_messages=5, timeout=60)
 
+    # Validate StatefulSet configuration
+    validate_statefulset()
+
     print("\n=== Querying state store ===")
     port_forward_and_test('streams-processor', 7070, test_state_store)
+
+    print("\n=== Testing metadata endpoints (multi-instance support) ===")
+    port_forward_and_test('streams-processor', 7070, test_metadata_endpoints)
 
     print("\n=== Testing Query API ===")
     port_forward_and_test('query-api', 8080, test_query_api)
@@ -78,6 +151,7 @@ def main():
     print("=" * 60)
 
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())
