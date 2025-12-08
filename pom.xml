@@ -27,7 +27,12 @@
         <quarkus.version>3.30.1</quarkus.version>
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.12</logback.version>
+        
+        <!-- Maven Plugins -->
         <jib.version>3.5.1</jib.version>
+        <maven.compiler.plugin.version>3.14.1</maven.compiler.plugin.version>
+        <maven.surefire.plugin.version>3.5.2</maven.surefire.plugin.version>
+        <maven.failsafe.plugin.version>3.5.2</maven.failsafe.plugin.version>
 
         <!-- Docker/Podman image configuration -->
         <docker.registry>smartship</docker.registry>
@@ -45,7 +50,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Quarkus BOM -->
             <dependency>
                 <groupId>io.quarkus.platform</groupId>
                 <artifactId>quarkus-bom</artifactId>
@@ -116,7 +120,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.13.0</version>
+                    <version>${maven.compiler.plugin.version}</version>
                     <configuration>
                         <source>${maven.compiler.source}</source>
                         <target>${maven.compiler.target}</target>
@@ -156,14 +160,14 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
-                    <version>3.5.2</version>
+                    <version>${maven.surefire.plugin.version}</version>
                 </plugin>
 
                 <!-- Maven Failsafe Plugin for integration tests -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-failsafe-plugin</artifactId>
-                    <version>3.5.2</version>
+                    <version>${maven.failsafe.plugin.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>
