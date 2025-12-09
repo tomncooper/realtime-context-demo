@@ -255,8 +255,6 @@ realtime-context-demo/
 │   └── src/main/java/com/smartship/common/
 │       ├── KafkaConfig.java
 │       └── ApicurioConfig.java
-├── database/                        # PostgreSQL schemas
-│   └── schema/init.sql
 ├── data-generators/                 # Event producers
 │   └── src/main/java/.../ShipmentEventGenerator.java
 ├── streams-processor/               # Kafka Streams (StatefulSet)
@@ -272,7 +270,8 @@ realtime-context-demo/
 │       ├── model/StreamsInstanceMetadata.java
 │       └── services/StreamsInstanceDiscoveryService.java
 ├── kubernetes/                      # K8s manifests
-│   ├── base/
+│   ├── infrastructure/              # Core infrastructure (Kafka, PostgreSQL, etc.)
+│   │   └── init.sql                 # PostgreSQL schema (used by configMapGenerator)
 │   ├── applications/                # Application manifests
 │   │   ├── data-generators.yaml
 │   │   ├── streams-processor.yaml   # StatefulSet + Headless Service

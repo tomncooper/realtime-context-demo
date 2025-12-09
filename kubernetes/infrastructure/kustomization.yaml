@@ -10,3 +10,10 @@ resources:
   - apicurio-registry.yaml
   - postgresql.yaml
 
+configMapGenerator:
+  - name: postgresql-init
+    files:
+      - init.sql
+    options:
+      disableNameSuffixHash: true
+

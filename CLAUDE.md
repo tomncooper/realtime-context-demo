@@ -217,9 +217,13 @@ kubectl exec -it events-cluster-dual-role-0 -n smartship -- bin/kafka-topics.sh 
 ```
 
 ### Kustomize Structure
-- `kubernetes/base/` - Common resources
+- `kubernetes/infrastructure/` - Core infrastructure (Kafka, Apicurio, PostgreSQL)
+  - `init.sql` - PostgreSQL schema (used by `configMapGenerator` to create ConfigMap)
+- `kubernetes/applications/` - Application deployments
 - `kubernetes/overlays/minikube/` - Laptop-optimized (~1.5 CPU, ~3.5Gi memory)
 - `kubernetes/overlays/cloud/` - Cloud-optimized (Phase 5+)
+
+**PostgreSQL Schema:** The `kubernetes/infrastructure/init.sql` file is the single source of truth for the PostgreSQL schema. Kustomize's `configMapGenerator` creates the `postgresql-init` ConfigMap from this file automatically during `kubectl apply`.
 
 Deploy with: `kubectl apply -k kubernetes/overlays/minikube`
 

@@ -42,7 +42,6 @@
     <modules>
         <module>schemas</module>
         <module>common</module>
-        <module>database</module>
         <module>data-generators</module>
         <module>streams-processor</module>
         <module>query-api</module>

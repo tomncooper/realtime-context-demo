@@ -25,12 +25,12 @@ realtime-context-demo/
 ├── pom.xml                          # Parent POM (✅ Phase 1)
 ├── schemas/                         # Avro schemas → generates Java classes (✅ Phase 1: shipment-event.avsc)
 ├── common/                          # Shared utilities (✅ Phase 1: KafkaConfig, ApicurioConfig)
-├── database/                        # PostgreSQL DDL and seed data scripts (✅ Phase 1: warehouses table)
 ├── data-generators/                 # Synthetic event producers (✅ Phase 1: 1 generator, Phase 2-6: 4 generators)
 ├── streams-processor/               # Kafka Streams (✅ Phase 1: 1 state store, Phase 3: 6 state stores)
 ├── query-api/                       # Quarkus REST API (✅ Phase 1: JVM mode, Phase 5: native image)
 ├── kubernetes/
-│   ├── base/                        # Common Kubernetes resources (✅ Phase 1)
+│   ├── infrastructure/              # Infrastructure resources (✅ Phase 1)
+│   │   └── init.sql                 # PostgreSQL DDL and seed data (✅ Phase 1: warehouses table)
 │   └── overlays/
 │       ├── minikube/                # Laptop-friendly (✅ Phase 1: ~1.5 CPU, ~3.5Gi RAM with KRaft)
 │       └── cloud/                   # Cloud-optimized (auto-scaling) - Phase 5
@@ -316,7 +316,7 @@ quarkus.container-image.builder=jib
 
 **Deployment:** StatefulSet with 10Gi PV (minikube) or 100Gi (cloud)
 
-**Critical file:** `database/schema/init.sql`
+**Critical file:** `kubernetes/infrastructure/init.sql`
 
 ## Technology Stack
 
@@ -651,7 +651,7 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 **Building on Phase 1:**
 - Extend existing schemas module with 3 new .avsc files
 - Extend data-generators module with additional generator classes
-- Update database/schema/init.sql with new tables
+- Update kubernetes/infrastructure/init.sql with new tables
 - Update Kubernetes manifests for increased resource allocation
 
 ### Phase 3: Complete Kafka Streams State Stores ⏭️ PENDING
@@ -777,7 +777,7 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 9. **query-api/src/main/java/com/smartship/api/model/StreamsInstanceMetadata.java** - Instance metadata DTO
 10. **kubernetes/applications/streams-processor.yaml** - StatefulSet + Headless Service
 11. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
-12. **database/schema/init.sql** - PostgreSQL DDL
+12. **kubernetes/infrastructure/init.sql** - PostgreSQL DDL
 
 ## Next Steps
 
