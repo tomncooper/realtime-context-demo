@@ -14,7 +14,13 @@ CONTAINER_RUNTIME = os.getenv('CONTAINER_RUNTIME', 'podman')
 KAFKA_CLUSTER_NAME = "events-cluster"
 NAMESPACE = "smartship"
 
-def run_command(cmd: List[str], check: bool = True, capture_output: bool = False, text: bool = True) -> subprocess.CompletedProcess:
+
+def run_command(
+        cmd: List[str],
+        check: bool = True,
+        capture_output: bool = False,
+        text: bool = True
+) -> subprocess.CompletedProcess:
     """Execute a shell command."""
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=check, capture_output=capture_output, text=text)
@@ -28,8 +34,13 @@ def kubectl(*args: str) -> subprocess.CompletedProcess:
     return run_command(['kubectl'] + list(args))
 
 
-def wait_for_condition(resource_type: str, resource_name: str, condition: str,
-                      namespace: str = NAMESPACE, timeout: int = 300) -> None:
+def wait_for_condition(
+        resource_type: str,
+        resource_name: str,
+        condition: str,
+        namespace: str = NAMESPACE,
+        timeout: int = 300
+) -> None:
     """Wait for Kubernetes resource condition."""
     print(f"Waiting for {resource_type}/{resource_name} to be {condition}...")
     kubectl('wait', f'{resource_type}/{resource_name}',
@@ -90,7 +101,10 @@ def setup_container_runtime() -> str:
     runtime_path = shutil.which(runtime)
 
     if runtime_path is None:
-        print(f"ERROR: {runtime} not found in PATH. Please install {runtime} or set CONTAINER_RUNTIME environment variable.")
+        print(
+            f"ERROR: {runtime} not found in PATH. "
+            f"Please install {runtime} or set CONTAINER_RUNTIME environment variable."
+        )
         sys.exit(1)
 
     print(f"Using container runtime: {runtime_path}")
@@ -172,7 +186,7 @@ def verify_kafka_data_flow(
                     stderr_text = result.stderr.decode('utf-8', errors='ignore')
                     if 'Processed a total of' in stderr_text:
                         print(f"  {stderr_text.strip()}")
-                except:
+                except (UnicodeDecodeError, AttributeError):
                     pass
         else:
             print(f"✗ No messages received from topic '{topic}'")

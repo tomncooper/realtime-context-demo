@@ -123,16 +123,19 @@ def main():
     if result.stdout:
         print(f"Kafka Ready Status: {result.stdout.strip()}")
 
-    print("\n=== Validating PostgreSQL ===")
+    print("\n=== Validating PostgreSQL (Phase 2 tables) ===")
     kubectl('exec', '-it', 'statefulset/postgresql', '-n', NAMESPACE, '--',
            'psql', '-U', 'smartship', '-d', 'smartship',
-           '-c', 'SELECT COUNT(*) FROM warehouses;')
+           '-c', "SELECT 'warehouses' as table_name, COUNT(*) as cnt FROM warehouses UNION ALL SELECT 'customers', COUNT(*) FROM customers UNION ALL SELECT 'vehicles', COUNT(*) FROM vehicles UNION ALL SELECT 'products', COUNT(*) FROM products UNION ALL SELECT 'drivers', COUNT(*) FROM drivers UNION ALL SELECT 'routes', COUNT(*) FROM routes;")
 
     print("\n=== Checking event generation ===")
     kubectl('logs', 'deployment/data-generators', '-n', NAMESPACE, '--tail=20')
 
-    print("\n=== Verifying Kafka Data Flow ===")
+    print("\n=== Verifying Kafka Data Flow (all topics) ===")
     verify_kafka_data_flow('shipment.events', max_messages=5, timeout=60)
+    verify_kafka_data_flow('vehicle.telemetry', max_messages=5, timeout=60)
+    verify_kafka_data_flow('warehouse.operations', max_messages=5, timeout=60)
+    verify_kafka_data_flow('order.status', max_messages=5, timeout=60)
 
     # Validate StatefulSet configuration
     validate_statefulset()

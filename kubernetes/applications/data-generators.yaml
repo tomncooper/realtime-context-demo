@@ -26,8 +26,8 @@ spec:
               value: "http://apicurio-registry.smartship.svc.cluster.local:8080/apis/registry/v2"
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "200m"
+              memory: "768Mi"
+              cpu: "400m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "1536Mi"
+              cpu: "800m"

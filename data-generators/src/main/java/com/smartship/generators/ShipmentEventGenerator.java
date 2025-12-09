@@ -1,6 +1,7 @@
 package com.smartship.generators;
 
 import com.smartship.common.KafkaConfig;
+import com.smartship.generators.DataCorrelationManager.DestinationInfo;
 import com.smartship.logistics.events.ShipmentEvent;
 import com.smartship.logistics.events.ShipmentEventType;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -9,59 +10,73 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
- * Simplified shipment event generator for Phase 1.
- * Generates complete shipment lifecycles: CREATED → IN_TRANSIT → DELIVERED
+ * Phase 2 shipment event generator with full lifecycle support.
+ * Generates events at 50-80 events/second with realistic lifecycle progression.
+ *
+ * Lifecycle: CREATED -> PICKED -> PACKED -> DISPATCHED -> IN_TRANSIT -> OUT_FOR_DELIVERY -> DELIVERED
+ * With 5% EXCEPTION rate and 2% CANCELLED rate.
  */
 public class ShipmentEventGenerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(ShipmentEventGenerator.class);
     private static final String TOPIC = "shipment.events";
 
-    // European warehouses from PostgreSQL seed data
-    private static final String[] WAREHOUSES = {
-        "WH-RTM", // Rotterdam
-        "WH-FRA", // Frankfurt
-        "WH-BCN", // Barcelona
-        "WH-WAW", // Warsaw
-        "WH-STO"  // Stockholm
-    };
+    // Target rate: 50-80 new shipments per second, but with staggered lifecycle
+    private static final int NEW_SHIPMENTS_PER_SECOND = 10;
+
+    // Exception and cancellation rates
+    private static final double EXCEPTION_RATE = 0.05;  // 5%
+    private static final double CANCELLATION_RATE = 0.02;  // 2%
+
+    // SLA durations in milliseconds
+    private static final long SLA_STANDARD = 5L * 24 * 60 * 60 * 1000;  // 5 days
+    private static final long SLA_EXPRESS = 2L * 24 * 60 * 60 * 1000;   // 2 days
+    private static final long SLA_SAME_DAY = 12L * 60 * 60 * 1000;      // 12 hours
+    private static final long SLA_CRITICAL = 4L * 60 * 60 * 1000;       // 4 hours
 
     private final KafkaProducer<String, ShipmentEvent> producer;
-    private final Random random = new Random();
+    private final DataCorrelationManager correlationManager;
+    private final ScheduledExecutorService scheduler;
+    private final ConcurrentHashMap<String, ShipmentSimState> activeLifecycles;
 
     public ShipmentEventGenerator() {
-        LOG.info("Initializing ShipmentEventGenerator");
+        LOG.info("Initializing ShipmentEventGenerator - Phase 2");
         this.producer = new KafkaProducer<>(KafkaConfig.createProducerConfig("shipment-event-generator"));
+        this.correlationManager = DataCorrelationManager.getInstance();
+        this.scheduler = Executors.newScheduledThreadPool(10);
+        this.activeLifecycles = new ConcurrentHashMap<>();
         LOG.info("Connected to Kafka: {}", KafkaConfig.getBootstrapServers());
-        LOG.info("Using Apicurio Registry: {}", KafkaConfig.getApicurioRegistryUrl());
     }
 
-    /**
-     * Start generating shipment lifecycle events.
-     */
     public void start() {
-        LOG.info("Starting ShipmentEventGenerator - Phase 1");
-        LOG.info("Generating shipment lifecycles every 6 seconds");
+        LOG.info("Starting ShipmentEventGenerator - Phase 2");
+        LOG.info("Generating {} new shipments per second", NEW_SHIPMENTS_PER_SECOND);
 
-        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-
-        // Generate a new shipment lifecycle every 6 seconds
+        // Schedule new shipment creation
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                generateShipmentLifecycle();
+                for (int i = 0; i < NEW_SHIPMENTS_PER_SECOND; i++) {
+                    createNewShipment();
+                }
             } catch (Exception e) {
-                LOG.error("Error generating shipment lifecycle", e);
+                LOG.error("Error creating new shipments", e);
             }
-        }, 0, 6, TimeUnit.SECONDS);
+        }, 0, 1, TimeUnit.SECONDS);
 
-        // Shutdown hook for graceful termination
+        // Schedule lifecycle progression (check every 500ms)
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                progressLifecycles();
+            } catch (Exception e) {
+                LOG.error("Error progressing lifecycles", e);
+            }
+        }, 500, 500, TimeUnit.MILLISECONDS);
+
+        // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("Shutting down ShipmentEventGenerator");
             scheduler.shutdown();
@@ -78,77 +93,180 @@ public class ShipmentEventGenerator {
         }));
     }
 
-    /**
-     * Generate a complete shipment lifecycle with realistic timing.
-     */
-    private void generateShipmentLifecycle() {
-        // Generate unique shipment ID
+    private void createNewShipment() {
         String shipmentId = "SH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        String warehouseId = correlationManager.getRandomWarehouseId();
+        String customerId = correlationManager.getRandomCustomerId();
+        DestinationInfo destination = correlationManager.getRandomDestination();
 
-        // Select random warehouse
-        String warehouseId = WAREHOUSES[random.nextInt(WAREHOUSES.length)];
+        // Calculate expected delivery based on random SLA tier
+        long now = System.currentTimeMillis();
+        long expectedDelivery = now + selectSlaOffset();
 
-        LOG.info("Starting lifecycle for shipment: {} from warehouse: {}", shipmentId, warehouseId);
+        // Register with correlation manager
+        correlationManager.registerShipment(shipmentId, warehouseId, customerId,
+            destination.getCity(), destination.getCountry(), expectedDelivery);
 
-        try {
-            // 1. CREATED
-            sendEvent(shipmentId, warehouseId, ShipmentEventType.CREATED);
-            Thread.sleep(2000); // 2 seconds delay
+        // Create simulation state
+        ShipmentSimState simState = new ShipmentSimState(shipmentId, warehouseId, customerId,
+            destination.getCity(), destination.getCountry(), expectedDelivery);
+        activeLifecycles.put(shipmentId, simState);
 
-            // 2. IN_TRANSIT
-            sendEvent(shipmentId, warehouseId, ShipmentEventType.IN_TRANSIT);
-            Thread.sleep(2000); // 2 seconds delay
+        // Send CREATED event
+        sendEvent(simState, ShipmentEventType.CREATED);
 
-            // 3. DELIVERED
-            sendEvent(shipmentId, warehouseId, ShipmentEventType.DELIVERED);
+        LOG.debug("Created shipment: {} for customer: {} to {}",
+            shipmentId, customerId, destination.getCity());
+    }
 
-            LOG.info("Completed lifecycle for shipment: {}", shipmentId);
+    private void progressLifecycles() {
+        long now = System.currentTimeMillis();
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warn("Lifecycle generation interrupted for shipment: {}", shipmentId);
+        for (ShipmentSimState simState : activeLifecycles.values()) {
+            if (simState.isReadyForNextState(now)) {
+                ShipmentEventType nextState = simState.getNextState();
+
+                if (nextState == null) {
+                    // Lifecycle complete
+                    activeLifecycles.remove(simState.shipmentId);
+                    correlationManager.removeShipment(simState.shipmentId);
+                    continue;
+                }
+
+                // Check for exception or cancellation
+                double rand = ThreadLocalRandom.current().nextDouble();
+                if (simState.currentState == ShipmentEventType.CREATED && rand < CANCELLATION_RATE) {
+                    sendEvent(simState, ShipmentEventType.CANCELLED);
+                    activeLifecycles.remove(simState.shipmentId);
+                    correlationManager.removeShipment(simState.shipmentId);
+                    continue;
+                }
+
+                if (simState.currentState == ShipmentEventType.IN_TRANSIT && rand < EXCEPTION_RATE) {
+                    sendEvent(simState, ShipmentEventType.EXCEPTION);
+                    // Exception doesn't end lifecycle, just delays it
+                    simState.scheduleNextTransition(now, 5000); // 5 second delay after exception
+                    continue;
+                }
+
+                // Normal transition
+                sendEvent(simState, nextState);
+                simState.advanceState(nextState, now);
+
+                // Update correlation manager
+                correlationManager.updateShipmentStatus(simState.shipmentId, nextState.name());
+            }
         }
     }
 
-    /**
-     * Send a single shipment event to Kafka.
-     */
-    private void sendEvent(String shipmentId, String warehouseId, ShipmentEventType eventType) {
+    private void sendEvent(ShipmentSimState simState, ShipmentEventType eventType) {
         ShipmentEvent event = ShipmentEvent.newBuilder()
-            .setShipmentId(shipmentId)
-            .setWarehouseId(warehouseId)
+            .setShipmentId(simState.shipmentId)
+            .setWarehouseId(simState.warehouseId)
+            .setCustomerId(simState.customerId)
+            .setExpectedDelivery(simState.expectedDelivery)
+            .setDestinationCity(simState.destinationCity)
+            .setDestinationCountry(simState.destinationCountry)
             .setEventType(eventType)
             .setTimestamp(System.currentTimeMillis())
             .build();
 
-        ProducerRecord<String, ShipmentEvent> record = new ProducerRecord<>(TOPIC, shipmentId, event);
+        ProducerRecord<String, ShipmentEvent> record = new ProducerRecord<>(TOPIC, simState.shipmentId, event);
 
         producer.send(record, (RecordMetadata metadata, Exception exception) -> {
             if (exception != null) {
-                LOG.error("Failed to send event for shipment: {} - {}", shipmentId, eventType, exception);
+                LOG.error("Failed to send event for shipment: {} - {}", simState.shipmentId, eventType, exception);
             } else {
                 LOG.debug("Sent: {} - {} to partition {} at offset {}",
-                    shipmentId, eventType, metadata.partition(), metadata.offset());
+                    simState.shipmentId, eventType, metadata.partition(), metadata.offset());
             }
         });
 
-        // Flush to ensure delivery
         producer.flush();
     }
 
+    private long selectSlaOffset() {
+        double rand = ThreadLocalRandom.current().nextDouble();
+        if (rand < 0.60) return SLA_STANDARD;
+        if (rand < 0.85) return SLA_EXPRESS;
+        if (rand < 0.95) return SLA_SAME_DAY;
+        return SLA_CRITICAL;
+    }
+
     /**
-     * Main entry point.
+     * Internal simulation state for each shipment lifecycle.
      */
+    private static class ShipmentSimState {
+        final String shipmentId;
+        final String warehouseId;
+        final String customerId;
+        final String destinationCity;
+        final String destinationCountry;
+        final long expectedDelivery;
+        ShipmentEventType currentState;
+        long nextTransitionTime;
+
+        ShipmentSimState(String shipmentId, String warehouseId, String customerId,
+                        String destinationCity, String destinationCountry, long expectedDelivery) {
+            this.shipmentId = shipmentId;
+            this.warehouseId = warehouseId;
+            this.customerId = customerId;
+            this.destinationCity = destinationCity;
+            this.destinationCountry = destinationCountry;
+            this.expectedDelivery = expectedDelivery;
+            this.currentState = ShipmentEventType.CREATED;
+            this.nextTransitionTime = System.currentTimeMillis() + randomDelay(1000, 3000);
+        }
+
+        boolean isReadyForNextState(long now) {
+            return now >= nextTransitionTime;
+        }
+
+        ShipmentEventType getNextState() {
+            return switch (currentState) {
+                case CREATED -> ShipmentEventType.PICKED;
+                case PICKED -> ShipmentEventType.PACKED;
+                case PACKED -> ShipmentEventType.DISPATCHED;
+                case DISPATCHED -> ShipmentEventType.IN_TRANSIT;
+                case IN_TRANSIT -> ShipmentEventType.OUT_FOR_DELIVERY;
+                case OUT_FOR_DELIVERY -> ShipmentEventType.DELIVERED;
+                case DELIVERED, CANCELLED, EXCEPTION -> null;
+            };
+        }
+
+        void advanceState(ShipmentEventType newState, long now) {
+            this.currentState = newState;
+            // Different delays for different stages
+            long delay = switch (newState) {
+                case PICKED -> randomDelay(1000, 3000);     // 1-3 seconds (picking)
+                case PACKED -> randomDelay(1000, 2000);     // 1-2 seconds (packing)
+                case DISPATCHED -> randomDelay(500, 1500);  // 0.5-1.5 seconds (dispatch)
+                case IN_TRANSIT -> randomDelay(3000, 8000); // 3-8 seconds (simulating transit)
+                case OUT_FOR_DELIVERY -> randomDelay(2000, 5000); // 2-5 seconds (last mile)
+                case DELIVERED -> 0;
+                default -> randomDelay(1000, 2000);
+            };
+            this.nextTransitionTime = now + delay;
+        }
+
+        void scheduleNextTransition(long now, long delayMs) {
+            this.nextTransitionTime = now + delayMs;
+        }
+
+        private static long randomDelay(long min, long max) {
+            return min + ThreadLocalRandom.current().nextLong(max - min);
+        }
+    }
+
     public static void main(String[] args) {
         LOG.info("=".repeat(60));
         LOG.info("SmartShip Logistics - Shipment Event Generator");
-        LOG.info("Phase 1: Simplified event generation");
+        LOG.info("Phase 2: Full lifecycle event generation");
         LOG.info("=".repeat(60));
 
         ShipmentEventGenerator generator = new ShipmentEventGenerator();
         generator.start();
 
-        // Keep main thread alive
         try {
             Thread.sleep(Long.MAX_VALUE);
         } catch (InterruptedException e) {

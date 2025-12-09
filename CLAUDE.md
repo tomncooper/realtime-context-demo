@@ -11,15 +11,21 @@ This means you should automatically use the Context7 MCP tools to resolve librar
 
 SmartShip Logistics is a real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics and fulfillment company. The project is implemented as a Maven multi-module monorepo deployed on Kubernetes (minikube).
 
-**Current Status:** Phase 1 ✅ COMPLETED (1 topic, 1 state store, basic query capability)
+**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED (4 topics, 4 generators, 6 PostgreSQL tables)
 
 ## Critical Architecture Concepts
 
 ### Event Flow Architecture
 ```
-Data Generator → Kafka Topic → Kafka Streams Processor → State Store → Query API
-     (Avro)      (shipment.    (LogisticsTopology)    (Interactive   (Quarkus)
-                  events)                              Queries)
+Data Generators → Kafka Topics → Kafka Streams Processor → State Store → Query API
+     (Avro)       (4 topics)     (LogisticsTopology)    (Interactive   (Quarkus)
+                                                         Queries)
+
+Topics (Phase 2):
+├── shipment.events        (50-80 events/sec)
+├── vehicle.telemetry      (20-30 events/sec)
+├── warehouse.operations   (15-25 events/sec)
+└── order.status           (10-15 events/sec)
 ```
 
 **Key insight:** The system uses **Kafka 4.1.1 with KRaft** (no ZooKeeper) for reduced resource usage (~400Mi memory savings). The Kafka cluster runs as a single-node deployment using Strimzi's `KafkaNodePool` with dual role (controller + broker).
@@ -287,18 +293,55 @@ open http://localhost:8080/swagger-ui
 
 ### View Kafka Events
 ```bash
+# View shipment events
 kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
   bin/kafka-console-consumer.sh \
   --bootstrap-server localhost:9092 \
   --topic shipment.events \
   --from-beginning \
   --max-messages 10
+
+# View vehicle telemetry
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
+  bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic vehicle.telemetry \
+  --from-beginning \
+  --max-messages 5
+
+# View warehouse operations
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
+  bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic warehouse.operations \
+  --from-beginning \
+  --max-messages 5
+
+# View order status
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
+  bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic order.status \
+  --from-beginning \
+  --max-messages 5
+
+# List all topics
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
+  bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
 ### PostgreSQL Access
 ```bash
 kubectl port-forward svc/postgresql 5432:5432 -n smartship &
+
+# View warehouses
 psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
+
+# View customers (sample)
+psql -h localhost -U smartship -d smartship -c "SELECT * FROM customers LIMIT 10;"
+
+# View all table counts
+psql -h localhost -U smartship -d smartship -c "SELECT 'warehouses', COUNT(*) FROM warehouses UNION ALL SELECT 'customers', COUNT(*) FROM customers UNION ALL SELECT 'vehicles', COUNT(*) FROM vehicles UNION ALL SELECT 'products', COUNT(*) FROM products UNION ALL SELECT 'drivers', COUNT(*) FROM drivers UNION ALL SELECT 'routes', COUNT(*) FROM routes;"
 ```
 
 ## Key Technology Versions
@@ -317,17 +360,69 @@ psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 
 All versions are centralized in parent `pom.xml` properties.
 
+## Data Generators Architecture (Phase 2)
+
+The `data-generators` module contains 4 generators coordinated by `DataCorrelationManager`:
+
+### DataCorrelationManager (Singleton)
+Central coordinator ensuring referential integrity across all generators:
+- Maintains in-memory state matching PostgreSQL seed data
+- Tracks active shipments, orders, and vehicle states
+- Key methods: `getRandomCustomerId()`, `getRandomVehicleId()`, `registerShipment()`, `getActiveShipmentIdsForWarehouse()`
+- File: `data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java`
+
+### Four Generator Threads
+All started by `GeneratorMain.java`:
+
+| Generator | Topic | Rate | Key Features |
+|-----------|-------|------|--------------|
+| ShipmentEventGenerator | shipment.events | 50-80/sec | 9-state lifecycle, 5% exception, 2% cancelled |
+| VehicleTelemetryGenerator | vehicle.telemetry | 20-30/sec | 50 vehicles, position updates, fuel consumption |
+| WarehouseOperationGenerator | warehouse.operations | 15-25/sec | 7 operation types, 3% error rate |
+| OrderStatusGenerator | order.status | 10-15/sec | 4 SLA tiers, 1-3 shipments per order |
+
+## Avro Schemas (Phase 2)
+
+Four schemas in `schemas/src/main/avro/`:
+
+| Schema | Key Fields | Enums |
+|--------|------------|-------|
+| `shipment-event.avsc` | shipment_id, customer_id, warehouse_id, destination_city | ShipmentEventType (9 values) |
+| `vehicle-telemetry.avsc` | vehicle_id, location (nested), current_load (nested) | VehicleStatus (5 values) |
+| `warehouse-operation.avsc` | event_id, warehouse_id, operation_type, shipment_id (nullable) | OperationType (7 values) |
+| `order-status.avsc` | order_id, customer_id, shipment_ids (array), priority | OrderStatusType (7), OrderPriority (4) |
+
+## PostgreSQL Reference Data (Phase 2)
+
+Six tables with full-scale seed data in `kubernetes/infrastructure/init.sql`:
+
+| Table | Records | Key Columns |
+|-------|---------|-------------|
+| warehouses | 5 | warehouse_id, city, country, capacity |
+| customers | 200 | customer_id, company_name, sla_tier |
+| vehicles | 50 | vehicle_id, vehicle_type, capacity_kg, home_warehouse_id |
+| products | 10,000 | product_id, sku, category, weight_kg |
+| drivers | 75 | driver_id, name, license_type, assigned_vehicle_id |
+| routes | 100 | route_id, origin_warehouse_id, destination_city, distance_km |
+
+Query all table counts:
+```bash
+kubectl exec -it statefulset/postgresql -n smartship -- psql -U smartship -d smartship \
+  -c "SELECT 'warehouses', COUNT(*) FROM warehouses UNION ALL SELECT 'customers', COUNT(*) FROM customers UNION ALL SELECT 'vehicles', COUNT(*) FROM vehicles UNION ALL SELECT 'products', COUNT(*) FROM products UNION ALL SELECT 'drivers', COUNT(*) FROM drivers UNION ALL SELECT 'routes', COUNT(*) FROM routes;"
+```
+
 ## Adding New Event Types (Future Phases)
 
-When implementing Phase 2+ (additional topics and generators):
+When implementing additional topics and generators:
 
 1. **Create Avro schema** in `schemas/src/main/avro/`
-2. **Add topic definition** in `kubernetes/base/kafka-topic.yaml` (KafkaTopic CR)
+2. **Add topic definition** in `kubernetes/infrastructure/kafka-topic.yaml` (KafkaTopic CR)
 3. **Create generator** in `data-generators/src/main/java/com/smartship/generators/`
-4. **Extend LogisticsTopology** in `streams-processor/` with new state stores
-5. **Add Interactive Query endpoints** in `InteractiveQueryServer.java`
-6. **Add REST endpoints** in `query-api/src/main/java/com/smartship/api/`
-7. **Rebuild in order:** schemas → common → other modules
+4. **Register with DataCorrelationManager** if referential integrity needed
+5. **Extend LogisticsTopology** in `streams-processor/` with new state stores
+6. **Add Interactive Query endpoints** in `InteractiveQueryServer.java`
+7. **Add REST endpoints** in `query-api/src/main/java/com/smartship/api/`
+8. **Rebuild in order:** schemas → common → other modules
 
 ## Phase Information
 
@@ -335,10 +430,17 @@ When implementing Phase 2+ (additional topics and generators):
 - Topic: `shipment.events` (CREATED → IN_TRANSIT → DELIVERED)
 - State store: `active-shipments-by-status` (count by status)
 - Generator: Simple lifecycle every 6 seconds
+- Multi-instance streams-processor support with StatefulSet
 
-**Phase 2-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
-- Phase 2: Add 3 more topics (vehicle telemetry, warehouse operations, order status)
-- Phase 3: Add 5 more state stores (6 total)
+**Phase 2 (✅ COMPLETED):** All 4 topics producing events with full-scale reference data
+- 4 Avro schemas (1 expanded + 3 new with nested records)
+- 4 Kafka topics at specified event rates
+- 4 generators + DataCorrelationManager for referential integrity
+- 6 PostgreSQL tables with 10,430 total records
+- Backward compatible with Phase 1 streams-processor
+
+**Phase 3-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
+- Phase 3: Add 5 more Kafka Streams state stores (6 total), consume all 4 topics
 - Phase 4: Complete Query API with PostgreSQL hybrid queries
 - Phase 5: Native image builds, production hardening
 - Phase 6: Demo optimization with LLM integration examples

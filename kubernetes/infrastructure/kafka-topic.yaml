@@ -9,5 +9,47 @@ spec:
   partitions: 3
   replicas: 1
   config:
-    retention.ms: 604800000 
-    segment.bytes: 1073741824 
+    retention.ms: 604800000
+    segment.bytes: 1073741824
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: vehicle.telemetry
+  namespace: smartship
+  labels:
+    strimzi.io/cluster: events-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 86400000
+    segment.bytes: 536870912
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: warehouse.operations
+  namespace: smartship
+  labels:
+    strimzi.io/cluster: events-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    segment.bytes: 536870912
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: order.status
+  namespace: smartship
+  labels:
+    strimzi.io/cluster: events-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    segment.bytes: 536870912

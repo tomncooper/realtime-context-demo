@@ -1,0 +1,81 @@
+{
+  "type": "record",
+  "name": "WarehouseOperation",
+  "namespace": "com.smartship.logistics.events",
+  "doc": "Warehouse operation event for tracking operational activity",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique operation event identifier"
+    },
+    {
+      "name": "warehouse_id",
+      "type": "string",
+      "doc": "Warehouse identifier"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Operation timestamp"
+    },
+    {
+      "name": "operation_type",
+      "type": {
+        "type": "enum",
+        "name": "OperationType",
+        "symbols": [
+          "RECEIVING",
+          "PUTAWAY",
+          "PICK",
+          "PACK",
+          "LOAD",
+          "INVENTORY_ADJUSTMENT",
+          "CYCLE_COUNT"
+        ]
+      },
+      "doc": "Type of warehouse operation"
+    },
+    {
+      "name": "operator_id",
+      "type": "string",
+      "doc": "Operator/worker identifier"
+    },
+    {
+      "name": "product_id",
+      "type": "string",
+      "doc": "Product SKU being handled"
+    },
+    {
+      "name": "quantity",
+      "type": "int",
+      "doc": "Quantity of items in this operation"
+    },
+    {
+      "name": "location",
+      "type": "string",
+      "doc": "Warehouse location code (aisle-rack-shelf)"
+    },
+    {
+      "name": "shipment_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Associated shipment ID (for PICK/PACK/LOAD operations)"
+    },
+    {
+      "name": "duration_seconds",
+      "type": "int",
+      "doc": "Duration of operation in seconds"
+    },
+    {
+      "name": "errors",
+      "type": {
+        "type": "array",
+        "items": "string"
+      },
+      "default": [],
+      "doc": "List of error codes if operation had issues"
+    }
+  ]
+}

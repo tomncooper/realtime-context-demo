@@ -62,7 +62,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.smartship.generators.ShipmentEventGenerator</mainClass>
+                            <mainClass>com.smartship.generators.GeneratorMain</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -74,7 +74,7 @@
                 <artifactId>jib-maven-plugin</artifactId>
                 <configuration>
                     <container>
-                        <mainClass>com.smartship.generators.ShipmentEventGenerator</mainClass>
+                        <mainClass>com.smartship.generators.GeneratorMain</mainClass>
                     </container>
                 </configuration>
             </plugin>

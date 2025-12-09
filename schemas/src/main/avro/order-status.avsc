@@ -1,0 +1,70 @@
+{
+  "type": "record",
+  "name": "OrderStatus",
+  "namespace": "com.smartship.logistics.events",
+  "doc": "Order status change event",
+  "fields": [
+    {
+      "name": "order_id",
+      "type": "string",
+      "doc": "Unique order identifier"
+    },
+    {
+      "name": "customer_id",
+      "type": "string",
+      "doc": "Customer identifier"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Status change timestamp"
+    },
+    {
+      "name": "status",
+      "type": {
+        "type": "enum",
+        "name": "OrderStatusType",
+        "symbols": [
+          "RECEIVED",
+          "VALIDATED",
+          "ALLOCATED",
+          "SHIPPED",
+          "DELIVERED",
+          "CANCELLED",
+          "RETURNED"
+        ]
+      },
+      "doc": "Current order status"
+    },
+    {
+      "name": "shipment_ids",
+      "type": {
+        "type": "array",
+        "items": "string"
+      },
+      "default": [],
+      "doc": "List of shipment IDs associated with this order"
+    },
+    {
+      "name": "total_items",
+      "type": "int",
+      "doc": "Total number of items in the order"
+    },
+    {
+      "name": "sla_timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "SLA deadline timestamp"
+    },
+    {
+      "name": "priority",
+      "type": {
+        "type": "enum",
+        "name": "OrderPriority",
+        "symbols": ["STANDARD", "EXPRESS", "SAME_DAY", "CRITICAL"]
+      },
+      "doc": "Order priority tier"
+    }
+  ]
+}

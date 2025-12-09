@@ -1,6 +1,6 @@
 # SmartShip Logistics Implementation Plan
 
-**Status:** Phase 1 ✅ COMPLETED | Phase 2-6 Pending
+**Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3-6 Pending
 
 ## Overview
 
@@ -23,14 +23,14 @@ This plan implements the synthetic data proposal for a regional logistics and fu
 ```
 realtime-context-demo/
 ├── pom.xml                          # Parent POM (✅ Phase 1)
-├── schemas/                         # Avro schemas → generates Java classes (✅ Phase 1: shipment-event.avsc)
+├── schemas/                         # Avro schemas → generates Java classes (✅ Phase 2: 4 schemas)
 ├── common/                          # Shared utilities (✅ Phase 1: KafkaConfig, ApicurioConfig)
-├── data-generators/                 # Synthetic event producers (✅ Phase 1: 1 generator, Phase 2-6: 4 generators)
+├── data-generators/                 # Synthetic event producers (✅ Phase 2: 4 generators + DataCorrelationManager)
 ├── streams-processor/               # Kafka Streams (✅ Phase 1: 1 state store, Phase 3: 6 state stores)
 ├── query-api/                       # Quarkus REST API (✅ Phase 1: JVM mode, Phase 5: native image)
 ├── kubernetes/
 │   ├── infrastructure/              # Infrastructure resources (✅ Phase 1)
-│   │   └── init.sql                 # PostgreSQL DDL and seed data (✅ Phase 1: warehouses table)
+│   │   └── init.sql                 # PostgreSQL DDL and seed data (✅ Phase 2: 6 tables, 10,430 records)
 │   └── overlays/
 │       ├── minikube/                # Laptop-friendly (✅ Phase 1: ~1.5 CPU, ~3.5Gi RAM with KRaft)
 │       └── cloud/                   # Cloud-optimized (auto-scaling) - Phase 5
@@ -390,13 +390,13 @@ kubectl apply -k kubernetes/overlays/cloud
 3. ✅ PostgreSQL StatefulSet with ConfigMap for init.sql
 4. ✅ Kafka cluster (via Strimzi Kafka CR) - **KRaft mode with KafkaNodePool**
 5. ✅ Apicurio Registry - Standalone Deployment (in-memory storage)
-6. ✅ Kafka Topics (1 KafkaTopic CR: shipment.events)
+6. ✅ Kafka Topics (4 KafkaTopic CRs: shipment.events, vehicle.telemetry, warehouse.operations, order.status)
 
 **Phase 3: Seed Data**
-7. ✅ PostgreSQL seed data loaded via init.sql ConfigMap (5 warehouses)
+7. ✅ PostgreSQL seed data loaded via init.sql ConfigMap (6 tables: 5 warehouses, 200 customers, 50 vehicles, 10K products, 75 drivers, 100 routes)
 
 **Phase 4: Applications**
-8. ✅ Data Generators Deployment (1 generator: ShipmentEventGenerator)
+8. ✅ Data Generators Deployment (4 generators: ShipmentEvent, VehicleTelemetry, WarehouseOperation, OrderStatus + GeneratorMain)
 9. ✅ Streams Processor StatefulSet + Headless Service + ClusterIP Service (port 7070)
 10. ✅ Query API Deployment + Service (port 8080)
 
@@ -413,7 +413,7 @@ kubectl apply -k kubernetes/overlays/cloud
 | ~~ZooKeeper~~ | ~~200m~~ | ~~500m~~ | ~~512Mi~~ | ~~1Gi~~ | ~~1~~ | ❌ Not used (KRaft) |
 | Apicurio Registry | 150m | 300m | 256Mi | 512Mi | 1 | ✅ |
 | PostgreSQL | 200m | 400m | 256Mi | 512Mi | 1 | ✅ |
-| Data Generators | 150m | 300m | 256Mi | 512Mi | 1 | ✅ |
+| Data Generators | 400m | 800m | 768Mi | 1536Mi | 1 | ✅ Phase 2 |
 | Streams Processor (StatefulSet) | 400m | 800m | 768Mi | 1536Mi | 1-3 | ✅ |
 | Query API (JVM) | 200m | 400m | 256Mi | 512Mi | 1 | ✅ Phase 1 |
 | Query API (native) | 100m | 250m | 64Mi | 128Mi | 1 | ⏭️ Phase 5 |
@@ -638,21 +638,45 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 - Used **Quarkus Cache** for instance metadata caching (30-second TTL)
 - Implemented **parallel query aggregation** with `CompletableFuture` for multi-instance queries
 
-### Phase 2: Add Remaining Topics & Generators ⏭️ PENDING
-**Status:** Pending
+### Phase 2: Add Remaining Topics & Generators ✅ COMPLETED
+**Status:** ✅ Complete
+**Timeline:** Completed December 2025
 **Goal:** All 4 topics producing events, with data correlation
 
-**Scope:**
-- Add 3 more schemas: vehicle-telemetry, warehouse-operation, order-status
-- Add 3 more generators: VehicleTelemetry, WarehouseOperation, OrderStatus
-- Implement DataCorrelationManager for referential integrity
-- Add 3 more PostgreSQL tables: vehicles, products, customers (with seed data)
+**Scope (Implemented):**
+- ✅ **Schemas:** 4 Avro schemas (shipment-event expanded + vehicle-telemetry, warehouse-operation, order-status)
+- ✅ **Generators:** 4 generators with DataCorrelationManager for referential integrity
+- ✅ **Kafka Topics:** 4 topics (shipment.events, vehicle.telemetry, warehouse.operations, order.status)
+- ✅ **PostgreSQL:** 6 tables with 10,430 total records (warehouses, customers, vehicles, products, drivers, routes)
 
-**Building on Phase 1:**
-- Extend existing schemas module with 3 new .avsc files
-- Extend data-generators module with additional generator classes
-- Update kubernetes/infrastructure/init.sql with new tables
-- Update Kubernetes manifests for increased resource allocation
+**Tasks Completed:**
+1. ✅ Expanded `shipment-event.avsc` with customer_id, expected_delivery, destination fields + 9 enum values
+2. ✅ Created `vehicle-telemetry.avsc` with nested GeoLocation and VehicleLoad records
+3. ✅ Created `warehouse-operation.avsc` with 7 operation types and errors array
+4. ✅ Created `order-status.avsc` with 7 status types and 4 priority levels
+5. ✅ Created `DataCorrelationManager.java` singleton for referential integrity across generators
+6. ✅ Updated `ShipmentEventGenerator.java` with full 9-state lifecycle (5% exception, 2% cancellation)
+7. ✅ Created `VehicleTelemetryGenerator.java` (20-30 events/sec, 50 vehicles)
+8. ✅ Created `WarehouseOperationGenerator.java` (15-25 events/sec, 3% error rate)
+9. ✅ Created `OrderStatusGenerator.java` (10-15 events/sec, 4 SLA tiers)
+10. ✅ Created `GeneratorMain.java` unified entry point
+11. ✅ Updated PostgreSQL `init.sql` with 5 new tables and full-scale seed data
+12. ✅ Added 3 new KafkaTopic CRs to `kafka-topic.yaml`
+13. ✅ Updated `data-generators.yaml` resource limits (768Mi/1536Mi memory, 400m/800m CPU)
+14. ✅ Updated `04-validate.py` to verify all 4 topics and 6 PostgreSQL tables
+
+**Deliverables (Achieved):**
+- ✅ 4 Kafka topics receiving events at specified rates
+- ✅ DataCorrelationManager ensuring valid cross-references between events
+- ✅ PostgreSQL with 6 tables: warehouses (5), customers (200), vehicles (50), products (10K), drivers (75), routes (100)
+- ✅ Event rates: ~50-80 shipment, 20-30 vehicle, 15-25 warehouse, 10-15 order events/sec
+- ✅ Backward compatible with Phase 1 streams-processor (expanded schema is additive)
+
+**Key Implementation Decisions:**
+- Used **consistent event rates** (deferred time-based peak/off-peak to later phase)
+- Implemented **singleton DataCorrelationManager** with in-memory state matching PostgreSQL seed data
+- Used **generate_series()** in PostgreSQL for efficient bulk seed data generation
+- Maintained **backward compatibility** with existing streams-processor (new fields are additions)
 
 ### Phase 3: Complete Kafka Streams State Stores ⏭️ PENDING
 **Status:** Pending
@@ -660,13 +684,15 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 
 **Scope:**
 - Add 5 more state stores (vehicle-current-state, shipments-by-customer, warehouse-realtime-metrics, late-shipments, hourly-delivery-performance)
+- Consume all 4 Kafka topics (shipment.events, vehicle.telemetry, warehouse.operations, order.status)
 - Implement windowed aggregations
 - Enhance Interactive Queries API with all state stores
 
-**Building on Phase 1:**
-- Extend LogisticsTopology.java with 5 additional state stores
+**Building on Phase 2:**
+- Extend LogisticsTopology.java with 5 additional state stores consuming all 4 topics
 - Update InteractiveQueryServer.java with new query endpoints
 - Update Query API to expose all state stores
+- Leverage expanded shipment-event schema (customer_id, destination) for shipments-by-customer
 
 ### Phase 4: Complete Query API ⏭️ PENDING
 **Status:** Pending
@@ -781,9 +807,10 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 
 ## Next Steps
 
-✅ **Phase 1 COMPLETED** - Minimal end-to-end system is fully operational and ready for deployment.
+✅ **Phase 1 COMPLETED** - Minimal end-to-end system with 1 topic, 1 state store.
+✅ **Phase 2 COMPLETED** - All 4 topics producing events with full-scale reference data.
 
-**To deploy Phase 1:**
+**To deploy Phase 2:**
 ```bash
 cd /home/tcooper/repos/redhat/realtime-context-demo
 
@@ -804,9 +831,10 @@ python3 scripts/04-validate.py
 ```
 
 **Future Implementation:**
-- Phase 2-6 will build upon the solid foundation established in Phase 1
-- Each phase adds incremental functionality while maintaining the working system
-- All infrastructure and tooling from Phase 1 will be reused and extended
+- Phase 3 will add 5 more Kafka Streams state stores, consuming all 4 topics
+- Phase 4 will complete the Query API with PostgreSQL hybrid queries
+- Phase 5 will add native image builds and production hardening
+- Phase 6 will add demo optimization and LLM integration examples
 
 ## Phase 1 Success Metrics (All Achieved)
 

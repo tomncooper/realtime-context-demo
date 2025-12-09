@@ -1,0 +1,98 @@
+{
+  "type": "record",
+  "name": "VehicleTelemetry",
+  "namespace": "com.smartship.logistics.events",
+  "doc": "Real-time vehicle telemetry data with location and load information",
+  "fields": [
+    {
+      "name": "vehicle_id",
+      "type": "string",
+      "doc": "Unique vehicle identifier"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Telemetry timestamp"
+    },
+    {
+      "name": "location",
+      "type": {
+        "type": "record",
+        "name": "GeoLocation",
+        "fields": [
+          {
+            "name": "latitude",
+            "type": "double",
+            "doc": "GPS latitude"
+          },
+          {
+            "name": "longitude",
+            "type": "double",
+            "doc": "GPS longitude"
+          },
+          {
+            "name": "speed_kmh",
+            "type": "double",
+            "doc": "Current speed in km/h"
+          },
+          {
+            "name": "heading",
+            "type": "double",
+            "doc": "Compass heading 0-360 degrees"
+          }
+        ]
+      },
+      "doc": "Current GPS location and movement"
+    },
+    {
+      "name": "status",
+      "type": {
+        "type": "enum",
+        "name": "VehicleStatus",
+        "symbols": ["IDLE", "EN_ROUTE", "LOADING", "UNLOADING", "MAINTENANCE"]
+      },
+      "doc": "Current vehicle operational status"
+    },
+    {
+      "name": "current_load",
+      "type": {
+        "type": "record",
+        "name": "VehicleLoad",
+        "fields": [
+          {
+            "name": "shipment_count",
+            "type": "int",
+            "doc": "Number of shipments currently loaded"
+          },
+          {
+            "name": "weight_kg",
+            "type": "double",
+            "doc": "Total cargo weight in kilograms"
+          },
+          {
+            "name": "volume_cubic_m",
+            "type": "double",
+            "doc": "Total cargo volume in cubic meters"
+          }
+        ]
+      },
+      "doc": "Current cargo load information"
+    },
+    {
+      "name": "driver_id",
+      "type": "string",
+      "doc": "Assigned driver identifier"
+    },
+    {
+      "name": "fuel_level_percent",
+      "type": "double",
+      "doc": "Current fuel level as percentage (0-100)"
+    },
+    {
+      "name": "odometer_km",
+      "type": "double",
+      "doc": "Total distance traveled in kilometers"
+    }
+  ]
+}

@@ -33,8 +33,11 @@ def main():
     kubectl('apply', '-f', 'kubernetes/applications/data-generators.yaml')
     wait_for_condition('deployment', 'data-generators', 'Available', timeout=300)
 
-    print("\n=== Verifying Kafka Data Flow ===")
+    print("\n=== Verifying Kafka Data Flow (all topics) ===")
     verify_kafka_data_flow('shipment.events', max_messages=5, timeout=60)
+    verify_kafka_data_flow('vehicle.telemetry', max_messages=5, timeout=60)
+    verify_kafka_data_flow('warehouse.operations', max_messages=5, timeout=60)
+    verify_kafka_data_flow('order.status', max_messages=5, timeout=60)
 
     print("\n=== Deploying Streams Processor (StatefulSet) ===")
     # Delete old Deployment if migrating to StatefulSet

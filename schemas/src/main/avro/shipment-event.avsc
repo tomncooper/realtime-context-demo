@@ -2,7 +2,7 @@
   "type": "record",
   "name": "ShipmentEvent",
   "namespace": "com.smartship.logistics.events",
-  "doc": "Simplified shipment lifecycle event for Phase 1",
+  "doc": "Shipment lifecycle event with customer and destination details",
   "fields": [
     {
       "name": "shipment_id",
@@ -15,11 +15,42 @@
       "doc": "Origin warehouse ID"
     },
     {
+      "name": "customer_id",
+      "type": "string",
+      "doc": "Customer identifier"
+    },
+    {
+      "name": "expected_delivery",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Expected delivery timestamp"
+    },
+    {
+      "name": "destination_city",
+      "type": "string",
+      "doc": "Destination city name"
+    },
+    {
+      "name": "destination_country",
+      "type": "string",
+      "doc": "Destination country name"
+    },
+    {
       "name": "event_type",
       "type": {
         "type": "enum",
         "name": "ShipmentEventType",
-        "symbols": ["CREATED", "IN_TRANSIT", "DELIVERED"]
+        "symbols": [
+          "CREATED",
+          "PICKED",
+          "PACKED",
+          "DISPATCHED",
+          "IN_TRANSIT",
+          "OUT_FOR_DELIVERY",
+          "DELIVERED",
+          "EXCEPTION",
+          "CANCELLED"
+        ]
       },
       "doc": "Shipment lifecycle stage"
     },
