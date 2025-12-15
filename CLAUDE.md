@@ -11,7 +11,7 @@ This means you should automatically use the Context7 MCP tools to resolve librar
 
 SmartShip Logistics is a real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics and fulfillment company. The project is implemented as a Maven multi-module monorepo deployed on Kubernetes (minikube).
 
-**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED (4 topics, 4 generators, 6 PostgreSQL tables)
+**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED (6 state stores, 14 API endpoints)
 
 ## Critical Architecture Concepts
 
@@ -75,11 +75,21 @@ quarkus.cache.caffeine.streams-instances.maximum-size=10
 
 ### Kafka Streams State Store Pattern
 The streams processor (`streams-processor/`) creates materialized KTables that are queryable via Interactive Queries:
-1. **Topology** (`LogisticsTopology.java`): Defines stream processing logic and state stores
+1. **Topology** (`LogisticsTopology.java`): Defines stream processing logic and 6 state stores
 2. **Interactive Query Server** (`InteractiveQueryServer.java`): Exposes HTTP endpoints on port 7070 for direct state store queries
 3. **Query API** (`query-api/`): Quarkus REST service that calls the Interactive Query Server
 
-**Important:** State stores are named constants (e.g., `STATE_STORE_NAME = "active-shipments-by-status"`). Use these constants when adding new query endpoints.
+**Six State Stores (Phase 3):**
+| Store Name | Type | Key | Description |
+|------------|------|-----|-------------|
+| `active-shipments-by-status` | KeyValue | ShipmentEventType | Count of shipments per status |
+| `vehicle-current-state` | KeyValue | vehicle_id | Latest telemetry per vehicle |
+| `shipments-by-customer` | KeyValue | customer_id | Aggregated stats per customer |
+| `late-shipments` | KeyValue | shipment_id | Shipments past expected delivery |
+| `warehouse-realtime-metrics` | Windowed (15 min) | warehouse_id | Operation metrics per window |
+| `hourly-delivery-performance` | Windowed (1 hour) | warehouse_id | Delivery stats per window |
+
+**Important:** State stores are named constants in `LogisticsTopology.java` (e.g., `ACTIVE_SHIPMENTS_BY_STATUS_STORE`). Use these constants when adding new query endpoints.
 
 ### Multi-Instance Streams Processor Architecture
 The streams-processor supports horizontal scaling with distributed state store queries:
@@ -254,11 +264,28 @@ kubectl logs -f deployment/data-generators -n smartship
 ```bash
 kubectl port-forward svc/streams-processor 7070:7070 -n smartship &
 
-# Get specific status count
+# State Store 1: active-shipments-by-status
+curl http://localhost:7070/state/active-shipments-by-status | jq
 curl http://localhost:7070/state/active-shipments-by-status/IN_TRANSIT | jq
 
-# Get all status counts
-curl http://localhost:7070/state/active-shipments-by-status | jq
+# State Store 2: vehicle-current-state
+curl http://localhost:7070/state/vehicle-current-state | jq
+curl http://localhost:7070/state/vehicle-current-state/VH-001 | jq
+
+# State Store 3: shipments-by-customer
+curl http://localhost:7070/state/shipments-by-customer | jq
+curl http://localhost:7070/state/shipments-by-customer/CUST-001 | jq
+
+# State Store 4: late-shipments
+curl http://localhost:7070/state/late-shipments | jq
+
+# State Store 5: warehouse-realtime-metrics (windowed)
+curl http://localhost:7070/state/warehouse-realtime-metrics | jq
+curl http://localhost:7070/state/warehouse-realtime-metrics/WH-RTM | jq
+
+# State Store 6: hourly-delivery-performance (windowed)
+curl http://localhost:7070/state/hourly-delivery-performance | jq
+curl http://localhost:7070/state/hourly-delivery-performance/WH-RTM | jq
 
 # Query StreamsMetadata (multi-instance support)
 curl http://localhost:7070/metadata/instances/active-shipments-by-status | jq
@@ -280,14 +307,33 @@ kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 kubectl scale statefulset streams-processor -n smartship --replicas=3
 ```
 
-### Query via REST API
+### Query via REST API (Phase 3: 14 endpoints)
 ```bash
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
-curl http://localhost:8080/api/shipments/by-status/CREATED | jq
+# Shipment endpoints
 curl http://localhost:8080/api/shipments/status/all | jq
+curl http://localhost:8080/api/shipments/by-status/IN_TRANSIT | jq
+curl http://localhost:8080/api/shipments/late | jq
 
-# OpenAPI/Swagger UI
+# Vehicle endpoints
+curl http://localhost:8080/api/vehicles/state | jq
+curl http://localhost:8080/api/vehicles/state/VH-001 | jq
+
+# Customer endpoints
+curl http://localhost:8080/api/customers/shipments/all | jq
+curl http://localhost:8080/api/customers/CUST-001/shipments | jq
+
+# Warehouse metrics endpoints
+curl http://localhost:8080/api/warehouses/metrics/all | jq
+curl http://localhost:8080/api/warehouses/WH-RTM/metrics | jq
+
+# Performance endpoints
+curl http://localhost:8080/api/performance/hourly | jq
+curl http://localhost:8080/api/performance/hourly/WH-RTM | jq
+
+# Health and OpenAPI
+curl http://localhost:8080/api/health | jq
 open http://localhost:8080/swagger-ui
 ```
 
@@ -439,9 +485,16 @@ When implementing additional topics and generators:
 - 6 PostgreSQL tables with 10,430 total records
 - Backward compatible with Phase 1 streams-processor
 
-**Phase 3-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
-- Phase 3: Add 5 more Kafka Streams state stores (6 total), consume all 4 topics
-- Phase 4: Complete Query API with PostgreSQL hybrid queries
+**Phase 3 (✅ COMPLETED):** All 6 Kafka Streams state stores operational
+- 6 state stores consuming 3 topics (shipment.events, vehicle.telemetry, warehouse.operations)
+- 4 KeyValue stores: active-shipments-by-status, vehicle-current-state, shipments-by-customer, late-shipments
+- 2 Windowed stores: warehouse-realtime-metrics (15-min), hourly-delivery-performance (1-hour hopping)
+- 14 REST API endpoints across 5 resource groups (Shipments, Vehicles, Customers, Warehouses, Performance)
+- JsonSerde for custom state store value serialization
+- Multi-instance query support with parallel aggregation
+
+**Phase 4-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
+- Phase 4: Complete Query API with PostgreSQL hybrid queries, order.status consumption
 - Phase 5: Native image builds, production hardening
 - Phase 6: Demo optimization with LLM integration examples
 

@@ -2,47 +2,55 @@
 
 A real-time event streaming demonstration for a regional logistics and fulfillment company, showcasing Kafka Streams, materialized views, and an LLM-queryable API.
 
-## Phase 1: Minimal End-to-End Implementation
+## Current Status: Phase 3 Complete
 
-**Status:** ✅ Complete (with multi-instance support)
-**Goal:** Working vertical slice with 1 topic, 1 state store, basic query capability, and horizontal scaling
+**Status:** ✅ Phase 1 | ✅ Phase 2 | ✅ Phase 3 (6 state stores, 14 API endpoints)
+**Goal:** Full real-time analytics with 6 materialized views, windowed aggregations, and comprehensive REST API
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐
-│ Data Generators │──┐
-│  (Shipments)    │  │
-└─────────────────┘  │
-                     ▼
-              ┌──────────────┐
-              │ Kafka (KRaft)│
-              │ shipment.    │
-              │   events     │
-              └──────┬───────┘
-                     │
-                     ▼
-         ┌─────────────────────┐
-         │ Kafka Streams       │
-         │ Processor           │
-         │ (StatefulSet)       │
-         │                     │
-         │ State Store:        │
-         │ active-shipments-   │
-         │  by-status          │
-         │                     │
-         │ Pods: 0, 1, 2...    │
-         └─────────┬───────────┘
-                   │
-                   ▼
-         ┌─────────────────┐
-         │ Query API       │
-         │ (Quarkus)       │
-         │                 │
-         │ Instance        │
-         │ Discovery →     │
-         │ Parallel Queries│
-         └─────────────────┘
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│ Shipment Events │     │ Vehicle         │     │ Warehouse       │
+│ Generator       │     │ Telemetry Gen   │     │ Operations Gen  │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+    ┌─────────────────────────────────────────────────────────┐
+    │              Kafka (KRaft) - 4 Topics                   │
+    │  shipment.events | vehicle.telemetry | warehouse.ops    │
+    └───────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+              ┌─────────────────────────────────────┐
+              │     Kafka Streams Processor         │
+              │         (StatefulSet)               │
+              │                                     │
+              │  6 State Stores:                    │
+              │  • active-shipments-by-status       │
+              │  • vehicle-current-state            │
+              │  • shipments-by-customer            │
+              │  • late-shipments                   │
+              │  • warehouse-realtime-metrics (15m) │
+              │  • hourly-delivery-performance (1h) │
+              │                                     │
+              │  Pods: 0, 1, 2... (scalable)        │
+              └──────────────────┬──────────────────┘
+                                 │
+                                 ▼
+              ┌─────────────────────────────────────┐
+              │          Query API (Quarkus)        │
+              │                                     │
+              │  14 REST Endpoints:                 │
+              │  • Shipments (status, late)         │
+              │  • Vehicles (state, location)       │
+              │  • Customers (shipment stats)       │
+              │  • Warehouses (real-time metrics)   │
+              │  • Performance (hourly delivery)    │
+              │                                     │
+              │  Multi-instance discovery           │
+              │  Parallel query aggregation         │
+              └─────────────────────────────────────┘
 ```
 
 ## 🚀 Technology Stack
@@ -145,9 +153,9 @@ Expected output:
 - `events-cluster-dual-role-0` - Kafka broker (KRaft mode)
 - `apicurio-registry-...` - Schema registry
 - `postgresql-0` - Database
-- `data-generators-...` - Event producer
-- `streams-processor-0` - Kafka Streams app (StatefulSet)
-- `query-api-...` - REST API
+- `data-generators-...` - Event producers (4 generators)
+- `streams-processor-0` - Kafka Streams app with 6 state stores (StatefulSet)
+- `query-api-...` - REST API with 14 endpoints
 
 ```bash
 # Check StatefulSet status
@@ -159,19 +167,30 @@ kubectl get statefulset -n smartship
 kubectl logs -f deployment/data-generators -n smartship
 ```
 
-### Query State Store (Interactive Queries)
+### Query State Stores (Interactive Queries - All 6 stores)
 ```bash
 kubectl port-forward svc/streams-processor 7070:7070 -n smartship &
 
-# Get count for specific status
-curl http://localhost:7070/state/active-shipments-by-status/IN_TRANSIT | jq
-
-# Get all status counts
+# State Store 1: Shipment counts by status
 curl http://localhost:7070/state/active-shipments-by-status | jq
+
+# State Store 2: Vehicle current state
+curl http://localhost:7070/state/vehicle-current-state | jq
+
+# State Store 3: Customer shipment stats
+curl http://localhost:7070/state/shipments-by-customer | jq
+
+# State Store 4: Late shipments
+curl http://localhost:7070/state/late-shipments | jq
+
+# State Store 5: Warehouse metrics (15-min window)
+curl http://localhost:7070/state/warehouse-realtime-metrics | jq
+
+# State Store 6: Hourly delivery performance (1-hour window)
+curl http://localhost:7070/state/hourly-delivery-performance | jq
 
 # Query StreamsMetadata (multi-instance support)
 curl http://localhost:7070/metadata/instances/active-shipments-by-status | jq
-curl http://localhost:7070/metadata/instance-for-key/active-shipments-by-status/IN_TRANSIT | jq
 ```
 
 ### Scale Streams Processor (Multi-Instance)
@@ -186,17 +205,33 @@ kubectl get pods -l app=streams-processor -n smartship
 kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 ```
 
-### Query via REST API
+### Query via REST API (14 endpoints)
 ```bash
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
-# Get shipments by status
-curl http://localhost:8080/api/shipments/by-status/CREATED | jq
-curl http://localhost:8080/api/shipments/by-status/IN_TRANSIT | jq
-curl http://localhost:8080/api/shipments/by-status/DELIVERED | jq
-
-# Get all status counts
+# Shipment endpoints
 curl http://localhost:8080/api/shipments/status/all | jq
+curl http://localhost:8080/api/shipments/by-status/IN_TRANSIT | jq
+curl http://localhost:8080/api/shipments/late | jq
+
+# Vehicle endpoints
+curl http://localhost:8080/api/vehicles/state | jq
+curl http://localhost:8080/api/vehicles/state/VH-001 | jq
+
+# Customer endpoints
+curl http://localhost:8080/api/customers/shipments/all | jq
+curl http://localhost:8080/api/customers/CUST-001/shipments | jq
+
+# Warehouse metrics (15-min windows)
+curl http://localhost:8080/api/warehouses/metrics/all | jq
+curl http://localhost:8080/api/warehouses/WH-RTM/metrics | jq
+
+# Hourly delivery performance
+curl http://localhost:8080/api/performance/hourly | jq
+curl http://localhost:8080/api/performance/hourly/WH-RTM | jq
+
+# Health check
+curl http://localhost:8080/api/health | jq
 
 # OpenAPI/Swagger UI
 open http://localhost:8080/swagger-ui
@@ -220,28 +255,28 @@ psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 
 ## 📊 What's Happening
 
-### Event Flow
-1. **Data Generator** creates shipment lifecycles every 6 seconds
-   - Generates: CREATED → IN_TRANSIT → DELIVERED
-   - Random warehouse selection from 5 European locations
-   - Events published to `shipment.events` Kafka topic
+### Event Flow (Phase 3)
+1. **Data Generators** produce events to 4 Kafka topics
+   - **Shipment Events** (50-80/sec): Full 9-state lifecycle with 5% exception rate
+   - **Vehicle Telemetry** (20-30/sec): Position updates for 50 vehicles
+   - **Warehouse Operations** (15-25/sec): 7 operation types with 3% error rate
+   - **Order Status** (10-15/sec): 4 SLA tiers
 
-2. **Kafka Streams Processor** (StatefulSet) consumes events and maintains state
-   - Groups events by status
-   - Counts shipments per status
-   - Stores in materialized view: `active-shipments-by-status`
-   - Exposes Interactive Queries API on port 7070
-   - Supports horizontal scaling with state partitioning
-   - Each pod has stable identity via headless service
+2. **Kafka Streams Processor** (StatefulSet) maintains 6 state stores
+   - **active-shipments-by-status**: Count of shipments per status
+   - **vehicle-current-state**: Latest telemetry per vehicle
+   - **shipments-by-customer**: Aggregated stats per customer
+   - **late-shipments**: Shipments past expected delivery (30-min grace)
+   - **warehouse-realtime-metrics**: 15-minute tumbling window
+   - **hourly-delivery-performance**: 1-hour hopping window (30-min advance)
 
-3. **Query API** provides REST endpoints with multi-instance support
-   - Discovers streams-processor instances via DNS
-   - Routes specific key queries to correct instance
-   - Aggregates results from all instances for aggregate queries
-   - Uses parallel queries with CompletableFuture
-   - Caches instance metadata for 30 seconds
-   - Returns JSON responses
-   - OpenAPI documentation available
+3. **Query API** provides 14 REST endpoints
+   - Shipments: status counts, late shipments
+   - Vehicles: current state, location
+   - Customers: shipment statistics
+   - Warehouses: real-time operation metrics
+   - Performance: hourly delivery stats
+   - Multi-instance query support with parallel aggregation
 
 ## 🏗️ Project Structure
 
@@ -257,17 +292,24 @@ realtime-context-demo/
 │       └── ApicurioConfig.java
 ├── data-generators/                 # Event producers
 │   └── src/main/java/.../ShipmentEventGenerator.java
-├── streams-processor/               # Kafka Streams (StatefulSet)
+├── streams-processor/               # Kafka Streams (StatefulSet) - 6 state stores
 │   └── src/main/java/com/smartship/streams/
-│       ├── LogisticsTopology.java
+│       ├── LogisticsTopology.java          # 6 state store definitions
 │       ├── StreamsApplication.java
-│       ├── InteractiveQueryServer.java
-│       └── StreamsMetadataResponse.java
-├── query-api/                       # Quarkus REST API
+│       ├── InteractiveQueryServer.java     # 12 query endpoints
+│       ├── StreamsMetadataResponse.java
+│       ├── model/                          # State store value types
+│       │   ├── VehicleState.java
+│       │   ├── CustomerShipmentStats.java
+│       │   ├── LateShipmentDetails.java
+│       │   ├── DeliveryStats.java
+│       │   └── WarehouseMetrics.java
+│       └── serde/JsonSerde.java            # Custom JSON serialization
+├── query-api/                       # Quarkus REST API - 14 endpoints
 │   └── src/main/java/com/smartship/api/
-│       ├── QueryResource.java
-│       ├── KafkaStreamsQueryService.java
-│       ├── model/StreamsInstanceMetadata.java
+│       ├── QueryResource.java              # REST endpoints
+│       ├── KafkaStreamsQueryService.java   # Distributed query support
+│       ├── model/                          # Response DTOs
 │       └── services/StreamsInstanceDiscoveryService.java
 ├── kubernetes/                      # K8s manifests
 │   ├── infrastructure/              # Core infrastructure (Kafka, PostgreSQL, etc.)
@@ -288,22 +330,33 @@ realtime-context-demo/
 
 ## 📝 Data Model
 
-### ShipmentEvent (Avro Schema)
-```json
-{
-  "shipment_id": "SH-ABC12345",
-  "warehouse_id": "WH-RTM",
-  "event_type": "IN_TRANSIT",
-  "timestamp": 1701234567890
-}
-```
+### Kafka Topics (4 topics)
+| Topic | Events/sec | Key Fields |
+|-------|------------|------------|
+| `shipment.events` | 50-80 | shipment_id, customer_id, warehouse_id, event_type |
+| `vehicle.telemetry` | 20-30 | vehicle_id, location, status, current_load |
+| `warehouse.operations` | 15-25 | event_id, warehouse_id, operation_type |
+| `order.status` | 10-15 | order_id, customer_id, shipment_ids, priority |
 
-### Warehouses (PostgreSQL)
-- WH-RTM: Rotterdam Distribution Center (Netherlands)
-- WH-FRA: Frankfurt Logistics Hub (Germany)
-- WH-BCN: Barcelona Fulfillment Center (Spain)
-- WH-WAW: Warsaw Regional Depot (Poland)
-- WH-STO: Stockholm Nordic Hub (Sweden)
+### State Stores (6 stores)
+| Store | Type | Key | Value |
+|-------|------|-----|-------|
+| `active-shipments-by-status` | KeyValue | ShipmentEventType | Count |
+| `vehicle-current-state` | KeyValue | vehicle_id | VehicleState |
+| `shipments-by-customer` | KeyValue | customer_id | CustomerShipmentStats |
+| `late-shipments` | KeyValue | shipment_id | LateShipmentDetails |
+| `warehouse-realtime-metrics` | Windowed (15m) | warehouse_id | WarehouseMetrics |
+| `hourly-delivery-performance` | Windowed (1h) | warehouse_id | DeliveryStats |
+
+### PostgreSQL Reference Data (6 tables)
+| Table | Records | Description |
+|-------|---------|-------------|
+| warehouses | 5 | Rotterdam, Frankfurt, Barcelona, Warsaw, Stockholm |
+| customers | 200 | Companies with SLA tiers |
+| vehicles | 50 | Vans, box trucks, semi-trailers |
+| products | 10,000 | SKUs across 5 categories |
+| drivers | 75 | With license types and assignments |
+| routes | 100 | Predefined routes with distance/time |
 
 ## 🐛 Troubleshooting
 
@@ -370,18 +423,21 @@ cd query-api && mvn clean package && cd ..
 ### Run Locally (without Kubernetes)
 Not recommended for Phase 1 - requires manual Kafka, Apicurio, and PostgreSQL setup.
 
-## 📚 Next Steps (Future Phases)
+## 📚 Phase Summary
 
-**Phase 1 Complete Features:**
-- ✅ Multi-instance streams-processor support (StatefulSet + headless service)
-- ✅ StreamsMetadata endpoints for instance discovery
-- ✅ Parallel query aggregation across instances
-- ✅ DNS-based instance discovery with health checks
+**Phase 1 (Complete):** Minimal end-to-end with 1 topic, 1 state store
+**Phase 2 (Complete):** All 4 topics producing events, 6 PostgreSQL tables
+**Phase 3 (Complete):** All 6 state stores operational with full Query API
+
+**Phase 3 Features:**
+- ✅ 6 state stores consuming 3 Kafka topics
+- ✅ 4 KeyValue stores + 2 Windowed stores
+- ✅ 14 REST API endpoints across 5 resource groups
+- ✅ JsonSerde for custom state store value serialization
+- ✅ Multi-instance query support with parallel aggregation
 
 **Upcoming Phases:**
-- **Phase 2:** Add vehicle telemetry, warehouse operations, and order status topics
-- **Phase 3:** Implement all 6 state stores with windowed aggregations
-- **Phase 4:** Complete Query API with multi-source hybrid queries
+- **Phase 4:** Complete Query API with PostgreSQL hybrid queries, order.status consumption
 - **Phase 5:** Production hardening, native image builds, comprehensive testing
 - **Phase 6:** Demo optimization with sample LLM query scripts
 
@@ -402,4 +458,4 @@ This is a demonstration project. See `design/implementation-plan.md` for complet
 
 ---
 
-**Phase 1 Status:** ✅ Complete - Ready for deployment and validation
+**Phase 3 Status:** ✅ Complete - All 6 state stores operational with 14 API endpoints
