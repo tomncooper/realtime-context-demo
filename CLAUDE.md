@@ -11,7 +11,7 @@ This means you should automatically use the Context7 MCP tools to resolve librar
 
 SmartShip Logistics is a real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics and fulfillment company. The project is implemented as a Maven multi-module monorepo deployed on Kubernetes (minikube).
 
-**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED (6 state stores, 14 API endpoints)
+**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED (9 state stores, 44+ API endpoints, hybrid queries)
 
 ## Critical Architecture Concepts
 
@@ -79,7 +79,7 @@ The streams processor (`streams-processor/`) creates materialized KTables that a
 2. **Interactive Query Server** (`InteractiveQueryServer.java`): Exposes HTTP endpoints on port 7070 for direct state store queries
 3. **Query API** (`query-api/`): Quarkus REST service that calls the Interactive Query Server
 
-**Six State Stores (Phase 3):**
+**Nine State Stores (Phase 4):**
 | Store Name | Type | Key | Description |
 |------------|------|-----|-------------|
 | `active-shipments-by-status` | KeyValue | ShipmentEventType | Count of shipments per status |
@@ -88,8 +88,28 @@ The streams processor (`streams-processor/`) creates materialized KTables that a
 | `late-shipments` | KeyValue | shipment_id | Shipments past expected delivery |
 | `warehouse-realtime-metrics` | Windowed (15 min) | warehouse_id | Operation metrics per window |
 | `hourly-delivery-performance` | Windowed (1 hour) | warehouse_id | Delivery stats per window |
+| `order-current-state` | KeyValue | order_id | Current state per order (Phase 4) |
+| `orders-by-customer` | KeyValue | customer_id | Aggregated order stats per customer (Phase 4) |
+| `order-sla-tracking` | KeyValue | order_id | Orders at SLA risk (Phase 4) |
 
 **Important:** State stores are named constants in `LogisticsTopology.java` (e.g., `ACTIVE_SHIPMENTS_BY_STATUS_STORE`). Use these constants when adding new query endpoints.
+
+### Phase 4: Hybrid Query Architecture
+The Query API now combines Kafka Streams real-time data with PostgreSQL reference data:
+
+```
+Query-API
+    ├── KafkaStreamsQueryService → Streams Processor → 9 State Stores
+    ├── PostgresQueryService → PostgreSQL → 6 Reference Tables
+    └── QueryOrchestrationService → Combines both sources → HybridQueryResult
+```
+
+**Key Components:**
+- **PostgresQueryService:** Reactive PostgreSQL queries using Mutiny `Uni<T>`
+- **QueryOrchestrationService:** Multi-source query orchestration with graceful error handling
+- **HybridQueryResult:** Result wrapper with `sources`, `warnings`, and `query_time_ms` metadata
+- **ReferenceDataResource:** 17 endpoints for PostgreSQL reference data (`/api/reference/*`)
+- **HybridQueryResource:** 7 endpoints for multi-source queries (`/api/hybrid/*`)
 
 ### Multi-Instance Streams Processor Architecture
 The streams-processor supports horizontal scaling with distributed state store queries:
@@ -307,7 +327,7 @@ kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 kubectl scale statefulset streams-processor -n smartship --replicas=3
 ```
 
-### Query via REST API (Phase 3: 14 endpoints)
+### Query via REST API (Phase 4: 44+ endpoints)
 ```bash
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
@@ -318,11 +338,11 @@ curl http://localhost:8080/api/shipments/late | jq
 
 # Vehicle endpoints
 curl http://localhost:8080/api/vehicles/state | jq
-curl http://localhost:8080/api/vehicles/state/VH-001 | jq
+curl http://localhost:8080/api/vehicles/state/VEH-001 | jq
 
 # Customer endpoints
 curl http://localhost:8080/api/customers/shipments/all | jq
-curl http://localhost:8080/api/customers/CUST-001/shipments | jq
+curl http://localhost:8080/api/customers/CUST-0001/shipments | jq
 
 # Warehouse metrics endpoints
 curl http://localhost:8080/api/warehouses/metrics/all | jq
@@ -332,10 +352,38 @@ curl http://localhost:8080/api/warehouses/WH-RTM/metrics | jq
 curl http://localhost:8080/api/performance/hourly | jq
 curl http://localhost:8080/api/performance/hourly/WH-RTM | jq
 
+# Order endpoints (Phase 4)
+curl http://localhost:8080/api/orders/state | jq
+curl http://localhost:8080/api/orders/by-customer/all | jq
+curl http://localhost:8080/api/orders/sla-risk | jq
+
+# Reference data endpoints (Phase 4 - PostgreSQL)
+curl http://localhost:8080/api/reference/warehouses | jq
+curl http://localhost:8080/api/reference/customers?limit=10 | jq
+curl http://localhost:8080/api/reference/vehicles | jq
+curl http://localhost:8080/api/reference/drivers | jq
+curl http://localhost:8080/api/reference/routes | jq
+curl http://localhost:8080/api/reference/products?limit=5 | jq
+
+# Hybrid query endpoints (Phase 4 - Kafka Streams + PostgreSQL)
+curl http://localhost:8080/api/hybrid/customers/CUST-0001/overview | jq
+curl http://localhost:8080/api/hybrid/customers/CUST-0001/sla-compliance | jq
+curl http://localhost:8080/api/hybrid/vehicles/VEH-001/enriched | jq
+curl http://localhost:8080/api/hybrid/drivers/DRV-001/tracking | jq
+curl http://localhost:8080/api/hybrid/warehouses/WH-RTM/status | jq
+curl http://localhost:8080/api/hybrid/orders/ORD-0001/details | jq
+
 # Health and OpenAPI
 curl http://localhost:8080/api/health | jq
 open http://localhost:8080/swagger-ui
 ```
+
+### ID Formats (Critical for Queries)
+Use these exact formats when querying:
+- **Customers:** `CUST-0001` through `CUST-0200` (4 digits, zero-padded)
+- **Vehicles:** `VEH-001` through `VEH-050` (3 digits)
+- **Drivers:** `DRV-001` through `DRV-075` (3 digits)
+- **Warehouses:** `WH-RTM`, `WH-FRA`, `WH-BCN`, `WH-WAW`, `WH-STO`
 
 ### View Kafka Events
 ```bash
@@ -410,12 +458,28 @@ All versions are centralized in parent `pom.xml` properties.
 
 The `data-generators` module contains 4 generators coordinated by `DataCorrelationManager`:
 
+### Reference Data Loading (Single Source of Truth)
+At startup, the data-generators loads all reference data from PostgreSQL:
+- **ReferenceDataLoader** connects to PostgreSQL with retry logic (30 attempts, exponential backoff)
+- Loads 6 tables: warehouses, customers, vehicles, drivers, products, routes
+- Initializes `DataCorrelationManager` with loaded data
+- PostgreSQL `kubernetes/infrastructure/init.sql` is the single source of truth
+
+**Environment Variables (data-generators):**
+- `POSTGRES_HOST` - PostgreSQL host (default: `postgresql.smartship.svc.cluster.local`)
+- `POSTGRES_USER` - Database user (default: `smartship`)
+- `POSTGRES_PASSWORD` - Database password
+- `POSTGRES_DB` - Database name (default: `smartship`)
+
 ### DataCorrelationManager (Singleton)
 Central coordinator ensuring referential integrity across all generators:
-- Maintains in-memory state matching PostgreSQL seed data
+- Initialized from PostgreSQL data at startup (no hardcoded values)
 - Tracks active shipments, orders, and vehicle states
 - Key methods: `getRandomCustomerId()`, `getRandomVehicleId()`, `registerShipment()`, `getActiveShipmentIdsForWarehouse()`
-- File: `data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java`
+- Files:
+  - `data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java`
+  - `data-generators/src/main/java/com/smartship/generators/ReferenceDataLoader.java`
+  - `data-generators/src/main/java/com/smartship/generators/model/*.java` (Warehouse, Customer, Vehicle, Driver, Product, Route, ReferenceData)
 
 ### Four Generator Threads
 All started by `GeneratorMain.java`:
@@ -482,7 +546,8 @@ When implementing additional topics and generators:
 - 4 Avro schemas (1 expanded + 3 new with nested records)
 - 4 Kafka topics at specified event rates
 - 4 generators + DataCorrelationManager for referential integrity
-- 6 PostgreSQL tables with 10,430 total records
+- 6 PostgreSQL tables with 10,430 total records (single source of truth)
+- ReferenceDataLoader loads all reference data from PostgreSQL at startup
 - Backward compatible with Phase 1 streams-processor
 
 **Phase 3 (✅ COMPLETED):** All 6 Kafka Streams state stores operational
@@ -493,8 +558,16 @@ When implementing additional topics and generators:
 - JsonSerde for custom state store value serialization
 - Multi-instance query support with parallel aggregation
 
-**Phase 4-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
-- Phase 4: Complete Query API with PostgreSQL hybrid queries, order.status consumption
+**Phase 4 (✅ COMPLETED):** Full LLM query capability with multi-source queries
+- 9 state stores (6 original + 3 order stores consuming order.status topic)
+- PostgreSQL reference data integration via Quarkus reactive PostgreSQL client
+- 17 reference data endpoints (`/api/reference/*`)
+- 7 hybrid query endpoints (`/api/hybrid/*`) combining Kafka Streams + PostgreSQL
+- QueryOrchestrationService for multi-source query orchestration
+- HybridQueryResult with `warnings` field for graceful error handling
+- Correct ID formats: CUST-0001 (4 digits), VEH-001 (3 digits), DRV-001 (3 digits)
+
+**Phase 5-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
 - Phase 5: Native image builds, production hardening
 - Phase 6: Demo optimization with LLM integration examples
 

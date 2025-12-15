@@ -14,7 +14,7 @@ import java.util.Map;
 
 /**
  * REST API for querying logistics data from Kafka Streams state stores.
- * Phase 3: Supports all 6 state stores.
+ * Phase 4: Supports all 9 state stores including order state stores.
  */
 @Path("/api")
 @Produces(MediaType.APPLICATION_JSON)
@@ -404,6 +404,196 @@ public class QueryResource {
     }
 
     // ===========================================
+    // Order State Endpoints (Phase 4)
+    // ===========================================
+
+    @GET
+    @Path("/orders/state")
+    @Tag(name = "Orders", description = "Query order state data")
+    @Operation(summary = "Get all order states",
+               description = "Returns current state for all orders")
+    public Response getAllOrderStates() {
+        LOG.info("Querying all order states");
+
+        try {
+            List<Map<String, Object>> orders = streamsQuery.getAllOrderStates();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("orders", orders);
+            response.put("count", orders.size());
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all order states", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/orders/state/{orderId}")
+    @Tag(name = "Orders")
+    @Operation(summary = "Get order state",
+               description = "Returns current state for a specific order")
+    public Response getOrderState(@PathParam("orderId") String orderId) {
+        LOG.infof("Querying order state for: %s", orderId);
+
+        try {
+            Map<String, Object> state = streamsQuery.getOrderState(orderId);
+
+            if (state == null || state.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Order not found: " + orderId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("order", state);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying order state for: %s", orderId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Customer Order Stats Endpoints (Phase 4)
+    // ===========================================
+
+    @GET
+    @Path("/orders/by-customer/all")
+    @Tag(name = "Orders")
+    @Operation(summary = "Get all customer order stats",
+               description = "Returns order statistics for all customers")
+    public Response getAllCustomerOrderStats() {
+        LOG.info("Querying all customer order stats");
+
+        try {
+            List<Map<String, Object>> stats = streamsQuery.getAllCustomerOrderStats();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("customers", stats);
+            response.put("count", stats.size());
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all customer order stats", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/orders/by-customer/{customerId}")
+    @Tag(name = "Orders")
+    @Operation(summary = "Get customer order stats",
+               description = "Returns order statistics for a specific customer")
+    public Response getCustomerOrderStats(@PathParam("customerId") String customerId) {
+        LOG.infof("Querying order stats for customer: %s", customerId);
+
+        try {
+            Map<String, Object> stats = streamsQuery.getCustomerOrderStats(customerId);
+
+            if (stats == null || stats.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Customer orders not found: " + customerId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("customer_order_stats", stats);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying customer order stats for: %s", customerId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Order SLA Tracking Endpoints (Phase 4)
+    // ===========================================
+
+    @GET
+    @Path("/orders/sla-risk")
+    @Tag(name = "Orders")
+    @Operation(summary = "Get orders at SLA risk",
+               description = "Returns all orders approaching or past SLA deadline")
+    public Response getOrdersAtSLARisk() {
+        LOG.info("Querying orders at SLA risk");
+
+        try {
+            List<Map<String, Object>> atRisk = streamsQuery.getOrdersAtSLARisk();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("at_risk_orders", atRisk);
+            response.put("count", atRisk.size());
+            response.put("sla_risk_threshold_minutes", 60);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying orders at SLA risk", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/orders/sla-risk/{orderId}")
+    @Tag(name = "Orders")
+    @Operation(summary = "Get order SLA tracking",
+               description = "Returns SLA tracking details for a specific order")
+    public Response getOrderSLATracking(@PathParam("orderId") String orderId) {
+        LOG.infof("Querying SLA tracking for order: %s", orderId);
+
+        try {
+            Map<String, Object> tracking = streamsQuery.getOrderSLATracking(orderId);
+
+            if (tracking == null || tracking.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Order SLA tracking not found: " + orderId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("sla_tracking", tracking);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying SLA tracking for order: %s", orderId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
     // Health Check
     // ===========================================
 
@@ -415,14 +605,17 @@ public class QueryResource {
         return Response.ok(Map.of(
             "status", "UP",
             "service", "smartship-query-api",
-            "phase", "3",
+            "phase", "4",
             "state_stores", List.of(
                 "active-shipments-by-status",
                 "vehicle-current-state",
                 "shipments-by-customer",
                 "late-shipments",
                 "warehouse-realtime-metrics",
-                "hourly-delivery-performance"
+                "hourly-delivery-performance",
+                "order-current-state",
+                "orders-by-customer",
+                "order-sla-tracking"
             ),
             "timestamp", System.currentTimeMillis()
         )).build();

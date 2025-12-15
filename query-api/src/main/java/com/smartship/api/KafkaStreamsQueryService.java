@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 /**
  * Service for querying Kafka Streams state stores via Interactive Queries.
- * Phase 3: Supports all 6 state stores with distributed queries.
+ * Phase 4: Supports all 9 state stores with distributed queries.
  */
 @ApplicationScoped
 public class KafkaStreamsQueryService {
@@ -35,6 +35,11 @@ public class KafkaStreamsQueryService {
     private static final String LATE_SHIPMENTS_STORE = "late-shipments";
     private static final String WAREHOUSE_METRICS_STORE = "warehouse-realtime-metrics";
     private static final String HOURLY_PERFORMANCE_STORE = "hourly-delivery-performance";
+
+    // Order state stores (Phase 4)
+    private static final String ORDER_STATE_STORE = "order-current-state";
+    private static final String ORDERS_BY_CUSTOMER_STORE = "orders-by-customer";
+    private static final String ORDER_SLA_TRACKING_STORE = "order-sla-tracking";
 
     @Inject
     StreamsInstanceDiscoveryService discoveryService;
@@ -464,6 +469,192 @@ public class KafkaStreamsQueryService {
         } catch (Exception e) {
             LOG.error("Error querying all hourly performance", e);
             throw new RuntimeException("Failed to query hourly performance", e);
+        }
+    }
+
+    // ===========================================
+    // State Store 7: order-current-state
+    // ===========================================
+
+    /**
+     * Get current state for a specific order.
+     */
+    public Map<String, Object> getOrderState(String orderId) {
+        LOG.debugf("Querying order state for: %s", orderId);
+
+        try {
+            StreamsInstanceMetadata instance = discoveryService.findInstanceForKey(ORDER_STATE_STORE, orderId);
+
+            if (instance == null) {
+                LOG.warnf("No instance found for order: %s", orderId);
+                return null;
+            }
+
+            return queryJsonObject(instance, "/state/order-current-state/" + orderId);
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying order state for: %s", orderId);
+            throw new RuntimeException("Failed to query order state", e);
+        }
+    }
+
+    /**
+     * Get current state for all orders.
+     */
+    public List<Map<String, Object>> getAllOrderStates() {
+        LOG.debug("Querying all order states");
+
+        try {
+            List<StreamsInstanceMetadata> instances = discoveryService.discoverInstances(ORDER_STATE_STORE);
+
+            if (instances.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<CompletableFuture<List<Map<String, Object>>>> futures = instances.stream()
+                .map(instance -> CompletableFuture.supplyAsync(
+                    () -> queryJsonArray(instance, "/state/order-current-state"),
+                    executorService
+                ))
+                .collect(Collectors.toList());
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            List<Map<String, Object>> allOrders = new ArrayList<>();
+            for (CompletableFuture<List<Map<String, Object>>> future : futures) {
+                allOrders.addAll(future.get());
+            }
+
+            LOG.infof("Retrieved %d order states", allOrders.size());
+            return allOrders;
+
+        } catch (Exception e) {
+            LOG.error("Error querying all order states", e);
+            throw new RuntimeException("Failed to query order states", e);
+        }
+    }
+
+    // ===========================================
+    // State Store 8: orders-by-customer
+    // ===========================================
+
+    /**
+     * Get order stats for a specific customer.
+     */
+    public Map<String, Object> getCustomerOrderStats(String customerId) {
+        LOG.debugf("Querying order stats for customer: %s", customerId);
+
+        try {
+            StreamsInstanceMetadata instance = discoveryService.findInstanceForKey(ORDERS_BY_CUSTOMER_STORE, customerId);
+
+            if (instance == null) {
+                LOG.warnf("No instance found for customer orders: %s", customerId);
+                return null;
+            }
+
+            return queryJsonObject(instance, "/state/orders-by-customer/" + customerId);
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying customer order stats for: %s", customerId);
+            throw new RuntimeException("Failed to query customer order stats", e);
+        }
+    }
+
+    /**
+     * Get order stats for all customers.
+     */
+    public List<Map<String, Object>> getAllCustomerOrderStats() {
+        LOG.debug("Querying all customer order stats");
+
+        try {
+            List<StreamsInstanceMetadata> instances = discoveryService.discoverInstances(ORDERS_BY_CUSTOMER_STORE);
+
+            if (instances.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<CompletableFuture<List<Map<String, Object>>>> futures = instances.stream()
+                .map(instance -> CompletableFuture.supplyAsync(
+                    () -> queryJsonArray(instance, "/state/orders-by-customer"),
+                    executorService
+                ))
+                .collect(Collectors.toList());
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            List<Map<String, Object>> allStats = new ArrayList<>();
+            for (CompletableFuture<List<Map<String, Object>>> future : futures) {
+                allStats.addAll(future.get());
+            }
+
+            LOG.infof("Retrieved order stats for %d customers", allStats.size());
+            return allStats;
+
+        } catch (Exception e) {
+            LOG.error("Error querying all customer order stats", e);
+            throw new RuntimeException("Failed to query customer order stats", e);
+        }
+    }
+
+    // ===========================================
+    // State Store 9: order-sla-tracking
+    // ===========================================
+
+    /**
+     * Get SLA tracking details for a specific order.
+     */
+    public Map<String, Object> getOrderSLATracking(String orderId) {
+        LOG.debugf("Querying SLA tracking for order: %s", orderId);
+
+        try {
+            StreamsInstanceMetadata instance = discoveryService.findInstanceForKey(ORDER_SLA_TRACKING_STORE, orderId);
+
+            if (instance == null) {
+                LOG.warnf("No instance found for order SLA tracking: %s", orderId);
+                return null;
+            }
+
+            return queryJsonObject(instance, "/state/order-sla-tracking/" + orderId);
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying SLA tracking for order: %s", orderId);
+            throw new RuntimeException("Failed to query order SLA tracking", e);
+        }
+    }
+
+    /**
+     * Get all orders at SLA risk.
+     */
+    public List<Map<String, Object>> getOrdersAtSLARisk() {
+        LOG.debug("Querying all orders at SLA risk");
+
+        try {
+            List<StreamsInstanceMetadata> instances = discoveryService.discoverInstances(ORDER_SLA_TRACKING_STORE);
+
+            if (instances.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<CompletableFuture<List<Map<String, Object>>>> futures = instances.stream()
+                .map(instance -> CompletableFuture.supplyAsync(
+                    () -> queryJsonArray(instance, "/state/order-sla-tracking"),
+                    executorService
+                ))
+                .collect(Collectors.toList());
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            List<Map<String, Object>> allAtRisk = new ArrayList<>();
+            for (CompletableFuture<List<Map<String, Object>>> future : futures) {
+                allAtRisk.addAll(future.get());
+            }
+
+            LOG.infof("Retrieved %d orders at SLA risk", allAtRisk.size());
+            return allAtRisk;
+
+        } catch (Exception e) {
+            LOG.error("Error querying orders at SLA risk", e);
+            throw new RuntimeException("Failed to query orders at SLA risk", e);
         }
     }
 

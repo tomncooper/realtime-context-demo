@@ -2,55 +2,59 @@
 
 A real-time event streaming demonstration for a regional logistics and fulfillment company, showcasing Kafka Streams, materialized views, and an LLM-queryable API.
 
-## Current Status: Phase 3 Complete
+## Current Status: Phase 4 Complete
 
-**Status:** ✅ Phase 1 | ✅ Phase 2 | ✅ Phase 3 (6 state stores, 14 API endpoints)
-**Goal:** Full real-time analytics with 6 materialized views, windowed aggregations, and comprehensive REST API
+**Status:** ✅ Phase 1 | ✅ Phase 2 | ✅ Phase 3 | ✅ Phase 4 (9 state stores, 44+ API endpoints, hybrid queries)
+**Goal:** Full LLM query capability with 9 materialized views, PostgreSQL integration, and multi-source hybrid queries
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ Shipment Events │     │ Vehicle         │     │ Warehouse       │
-│ Generator       │     │ Telemetry Gen   │     │ Operations Gen  │
-└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │              Kafka (KRaft) - 4 Topics                   │
-    │  shipment.events | vehicle.telemetry | warehouse.ops    │
-    └───────────────────────────┬─────────────────────────────┘
-                                │
-                                ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ Shipment Events │  │ Vehicle         │  │ Warehouse       │  │ Order Status    │
+│ Generator       │  │ Telemetry Gen   │  │ Operations Gen  │  │ Generator       │
+└────────┬────────┘  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
+         │                    │                    │                    │
+         ▼                    ▼                    ▼                    ▼
+    ┌──────────────────────────────────────────────────────────────────────────┐
+    │                      Kafka (KRaft) - 4 Topics                            │
+    │  shipment.events | vehicle.telemetry | warehouse.ops | order.status      │
+    └────────────────────────────────────┬─────────────────────────────────────┘
+                                         │
+                                         ▼
               ┌─────────────────────────────────────┐
               │     Kafka Streams Processor         │
               │         (StatefulSet)               │
               │                                     │
-              │  6 State Stores:                    │
+              │  9 State Stores (Phase 4):          │
               │  • active-shipments-by-status       │
               │  • vehicle-current-state            │
               │  • shipments-by-customer            │
               │  • late-shipments                   │
               │  • warehouse-realtime-metrics (15m) │
               │  • hourly-delivery-performance (1h) │
+              │  • order-current-state (Phase 4)    │
+              │  • orders-by-customer (Phase 4)     │
+              │  • order-sla-tracking (Phase 4)     │
               │                                     │
               │  Pods: 0, 1, 2... (scalable)        │
               └──────────────────┬──────────────────┘
                                  │
-                                 ▼
-              ┌─────────────────────────────────────┐
-              │          Query API (Quarkus)        │
-              │                                     │
-              │  14 REST Endpoints:                 │
-              │  • Shipments (status, late)         │
-              │  • Vehicles (state, location)       │
-              │  • Customers (shipment stats)       │
-              │  • Warehouses (real-time metrics)   │
-              │  • Performance (hourly delivery)    │
-              │                                     │
-              │  Multi-instance discovery           │
-              │  Parallel query aggregation         │
-              └─────────────────────────────────────┘
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐   ┌─────────────────────────┐   ┌─────────────────┐
+│   PostgreSQL    │   │    Query API (Quarkus)  │   │   OpenAPI/      │
+│   (Reference)   │   │                         │   │   Swagger UI    │
+│                 │◀──│  44+ REST Endpoints:    │──▶│                 │
+│  6 Tables:      │   │  • Kafka Streams (14)   │   │  /swagger-ui    │
+│  • warehouses   │   │  • Reference Data (17)  │   │                 │
+│  • customers    │   │  • Hybrid Queries (7)   │   └─────────────────┘
+│  • vehicles     │   │  • Order State (6)      │
+│  • products     │   │                         │
+│  • drivers      │   │  Multi-source queries   │
+│  • routes       │   │  with HybridQueryResult │
+└─────────────────┘   └─────────────────────────┘
 ```
 
 ## 🚀 Technology Stack
@@ -205,7 +209,7 @@ kubectl get pods -l app=streams-processor -n smartship
 kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 ```
 
-### Query via REST API (14 endpoints)
+### Query via REST API (44+ endpoints - Phase 4)
 ```bash
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
@@ -216,11 +220,11 @@ curl http://localhost:8080/api/shipments/late | jq
 
 # Vehicle endpoints
 curl http://localhost:8080/api/vehicles/state | jq
-curl http://localhost:8080/api/vehicles/state/VH-001 | jq
+curl http://localhost:8080/api/vehicles/state/VEH-001 | jq
 
 # Customer endpoints
 curl http://localhost:8080/api/customers/shipments/all | jq
-curl http://localhost:8080/api/customers/CUST-001/shipments | jq
+curl http://localhost:8080/api/customers/CUST-0001/shipments | jq
 
 # Warehouse metrics (15-min windows)
 curl http://localhost:8080/api/warehouses/metrics/all | jq
@@ -230,12 +234,33 @@ curl http://localhost:8080/api/warehouses/WH-RTM/metrics | jq
 curl http://localhost:8080/api/performance/hourly | jq
 curl http://localhost:8080/api/performance/hourly/WH-RTM | jq
 
+# Order endpoints (Phase 4)
+curl http://localhost:8080/api/orders/state | jq
+curl http://localhost:8080/api/orders/by-customer/all | jq
+curl http://localhost:8080/api/orders/sla-risk | jq
+
+# Reference data endpoints (Phase 4 - PostgreSQL)
+curl http://localhost:8080/api/reference/warehouses | jq
+curl http://localhost:8080/api/reference/customers?limit=10 | jq
+curl http://localhost:8080/api/reference/vehicles | jq
+
+# Hybrid query endpoints (Phase 4 - Kafka Streams + PostgreSQL)
+curl http://localhost:8080/api/hybrid/customers/CUST-0001/overview | jq
+curl http://localhost:8080/api/hybrid/vehicles/VEH-001/enriched | jq
+curl http://localhost:8080/api/hybrid/warehouses/WH-RTM/status | jq
+
 # Health check
 curl http://localhost:8080/api/health | jq
 
 # OpenAPI/Swagger UI
 open http://localhost:8080/swagger-ui
 ```
+
+### ID Formats (Important!)
+- **Customers:** `CUST-0001` through `CUST-0200` (4 digits, zero-padded)
+- **Vehicles:** `VEH-001` through `VEH-050` (3 digits)
+- **Drivers:** `DRV-001` through `DRV-075` (3 digits)
+- **Warehouses:** `WH-RTM`, `WH-FRA`, `WH-BCN`, `WH-WAW`, `WH-STO`
 
 ### View Kafka Events
 ```bash
@@ -257,6 +282,7 @@ psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 
 ### Event Flow (Phase 3)
 1. **Data Generators** produce events to 4 Kafka topics
+   - Loads reference data from PostgreSQL at startup (single source of truth)
    - **Shipment Events** (50-80/sec): Full 9-state lifecycle with 5% exception rate
    - **Vehicle Telemetry** (20-30/sec): Position updates for 50 vehicles
    - **Warehouse Operations** (15-25/sec): 7 operation types with 3% error rate
@@ -290,8 +316,13 @@ realtime-context-demo/
 │   └── src/main/java/com/smartship/common/
 │       ├── KafkaConfig.java
 │       └── ApicurioConfig.java
-├── data-generators/                 # Event producers
-│   └── src/main/java/.../ShipmentEventGenerator.java
+├── data-generators/                 # Event producers (loads from PostgreSQL)
+│   └── src/main/java/com/smartship/generators/
+│       ├── GeneratorMain.java               # Entry point
+│       ├── ReferenceDataLoader.java         # PostgreSQL loader with retry
+│       ├── DataCorrelationManager.java      # Central coordinator
+│       ├── ShipmentEventGenerator.java
+│       └── model/                           # Reference data models
 ├── streams-processor/               # Kafka Streams (StatefulSet) - 6 state stores
 │   └── src/main/java/com/smartship/streams/
 │       ├── LogisticsTopology.java          # 6 state store definitions
@@ -338,7 +369,7 @@ realtime-context-demo/
 | `warehouse.operations` | 15-25 | event_id, warehouse_id, operation_type |
 | `order.status` | 10-15 | order_id, customer_id, shipment_ids, priority |
 
-### State Stores (6 stores)
+### State Stores (9 stores - Phase 4)
 | Store | Type | Key | Value |
 |-------|------|-----|-------|
 | `active-shipments-by-status` | KeyValue | ShipmentEventType | Count |
@@ -347,8 +378,13 @@ realtime-context-demo/
 | `late-shipments` | KeyValue | shipment_id | LateShipmentDetails |
 | `warehouse-realtime-metrics` | Windowed (15m) | warehouse_id | WarehouseMetrics |
 | `hourly-delivery-performance` | Windowed (1h) | warehouse_id | DeliveryStats |
+| `order-current-state` | KeyValue | order_id | OrderState (Phase 4) |
+| `orders-by-customer` | KeyValue | customer_id | CustomerOrderStats (Phase 4) |
+| `order-sla-tracking` | KeyValue | order_id | SLATracking (Phase 4) |
 
-### PostgreSQL Reference Data (6 tables)
+### PostgreSQL Reference Data (6 tables - Single Source of Truth)
+PostgreSQL is the authoritative source for all reference data. The data-generators module loads this data at startup.
+
 | Table | Records | Description |
 |-------|---------|-------------|
 | warehouses | 5 | Rotterdam, Frankfurt, Barcelona, Warsaw, Stockholm |
@@ -357,6 +393,8 @@ realtime-context-demo/
 | products | 10,000 | SKUs across 5 categories |
 | drivers | 75 | With license types and assignments |
 | routes | 100 | Predefined routes with distance/time |
+
+**Schema Definition:** `kubernetes/infrastructure/init.sql`
 
 ## 🐛 Troubleshooting
 
@@ -428,18 +466,22 @@ Not recommended for Phase 1 - requires manual Kafka, Apicurio, and PostgreSQL se
 **Phase 1 (Complete):** Minimal end-to-end with 1 topic, 1 state store
 **Phase 2 (Complete):** All 4 topics producing events, 6 PostgreSQL tables
 **Phase 3 (Complete):** All 6 state stores operational with full Query API
+**Phase 4 (Complete):** Full LLM query capability with hybrid queries
 
-**Phase 3 Features:**
-- ✅ 6 state stores consuming 3 Kafka topics
-- ✅ 4 KeyValue stores + 2 Windowed stores
-- ✅ 14 REST API endpoints across 5 resource groups
-- ✅ JsonSerde for custom state store value serialization
-- ✅ Multi-instance query support with parallel aggregation
+**Phase 4 Features:**
+- ✅ 9 state stores consuming 4 Kafka topics (including order.status)
+- ✅ 6 KeyValue stores + 2 Windowed stores + 3 Order stores
+- ✅ 44+ REST API endpoints across multiple resource groups
+- ✅ 17 PostgreSQL reference data endpoints
+- ✅ 7 hybrid query endpoints combining Kafka Streams + PostgreSQL
+- ✅ HybridQueryResult with `warnings` field for data quality indicators
+- ✅ Graceful error handling for Kafka Streams connection issues
+- ✅ Multi-source query orchestration via QueryOrchestrationService
 
 **Upcoming Phases:**
-- **Phase 4:** Complete Query API with PostgreSQL hybrid queries, order.status consumption
 - **Phase 5:** Production hardening, native image builds, comprehensive testing
 - **Phase 6:** Demo optimization with sample LLM query scripts
+- **Phase 7-8:** LLM chatbot integration with Quarkus LangChain4j
 
 ## 🤝 Contributing
 
@@ -458,4 +500,4 @@ This is a demonstration project. See `design/implementation-plan.md` for complet
 
 ---
 
-**Phase 3 Status:** ✅ Complete - All 6 state stores operational with 14 API endpoints
+**Phase 4 Status:** ✅ Complete - 9 state stores, 44+ API endpoints, hybrid queries with PostgreSQL integration

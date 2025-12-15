@@ -1,5 +1,6 @@
 package com.smartship.generators;
 
+import com.smartship.generators.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -7,10 +8,12 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 /**
  * Central coordinator for data correlation across generators.
  * Maintains in-memory state for active entities and ensures valid cross-references.
+ * Reference data is loaded from PostgreSQL at startup.
  */
 public class DataCorrelationManager {
 
@@ -19,7 +22,7 @@ public class DataCorrelationManager {
     // Singleton instance
     private static volatile DataCorrelationManager instance;
 
-    // Reference data (loaded from PostgreSQL seed data patterns)
+    // Reference data (loaded from PostgreSQL)
     private final List<String> warehouseIds;
     private final List<String> customerIds;
     private final List<String> vehicleIds;
@@ -27,44 +30,86 @@ public class DataCorrelationManager {
     private final List<String> productIds;
     private final List<String> routeIds;
 
+    // Full reference data for lookups
+    private final Map<String, Warehouse> warehouseMap;
+    private final Map<String, Vehicle> vehicleMap;
+
     // Active state tracking
     private final ConcurrentHashMap<String, ShipmentState> activeShipments;
     private final ConcurrentHashMap<String, OrderState> activeOrders;
-    private final ConcurrentHashMap<String, VehicleState> activeVehicles;
+    private final ConcurrentHashMap<String, VehicleRuntimeState> activeVehicles;
 
-    // Destination cities (from routes table)
+    // Destination cities (derived from routes)
     private final List<DestinationInfo> destinations;
 
     // Warehouse locations for geo calculations
     private final Map<String, WarehouseLocation> warehouseLocations;
 
-    private DataCorrelationManager() {
-        // Initialize reference data (matching PostgreSQL seed data)
-        this.warehouseIds = List.of("WH-RTM", "WH-FRA", "WH-BCN", "WH-WAW", "WH-STO");
-        this.customerIds = generateSequentialIds("CUST-", 200, 4);
-        this.vehicleIds = generateSequentialIds("VEH-", 50, 3);
-        this.driverIds = generateSequentialIds("DRV-", 75, 3);
-        this.productIds = generateSequentialIds("PROD-", 10000, 6);
-        this.routeIds = generateSequentialIds("RTE-", 100, 3);
+    private DataCorrelationManager(ReferenceData data) {
+        // Extract IDs from loaded reference data
+        this.warehouseIds = data.getWarehouses().stream()
+            .map(Warehouse::getWarehouseId)
+            .collect(Collectors.toList());
 
+        this.customerIds = data.getCustomers().stream()
+            .map(Customer::getCustomerId)
+            .collect(Collectors.toList());
+
+        this.vehicleIds = data.getVehicles().stream()
+            .map(Vehicle::getVehicleId)
+            .collect(Collectors.toList());
+
+        this.driverIds = data.getDrivers().stream()
+            .map(Driver::getDriverId)
+            .collect(Collectors.toList());
+
+        this.productIds = data.getProducts().stream()
+            .map(Product::getProductId)
+            .collect(Collectors.toList());
+
+        this.routeIds = data.getRoutes().stream()
+            .map(Route::getRouteId)
+            .collect(Collectors.toList());
+
+        // Build lookup maps
+        this.warehouseMap = data.getWarehouses().stream()
+            .collect(Collectors.toMap(Warehouse::getWarehouseId, w -> w));
+
+        this.vehicleMap = data.getVehicles().stream()
+            .collect(Collectors.toMap(Vehicle::getVehicleId, v -> v));
+
+        // Build warehouse locations from loaded data
+        this.warehouseLocations = buildWarehouseLocations(data.getWarehouses());
+
+        // Build destinations from routes (unique city/country pairs)
+        this.destinations = buildDestinations(data.getRoutes());
+
+        // Initialize state tracking
         this.activeShipments = new ConcurrentHashMap<>();
         this.activeOrders = new ConcurrentHashMap<>();
         this.activeVehicles = new ConcurrentHashMap<>();
 
-        this.destinations = initializeDestinations();
-        this.warehouseLocations = initializeWarehouseLocations();
-
-        LOG.info("DataCorrelationManager initialized with {} warehouses, {} customers, {} vehicles, {} products",
-            warehouseIds.size(), customerIds.size(), vehicleIds.size(), productIds.size());
+        LOG.info("DataCorrelationManager initialized from PostgreSQL with {} warehouses, {} customers, {} vehicles, {} drivers, {} products, {} routes",
+            warehouseIds.size(), customerIds.size(), vehicleIds.size(), driverIds.size(), productIds.size(), routeIds.size());
     }
 
+    /**
+     * Initialize the DataCorrelationManager with reference data loaded from PostgreSQL.
+     * Must be called once at startup before getInstance() is used.
+     */
+    public static synchronized void initialize(ReferenceData data) {
+        if (instance != null) {
+            throw new IllegalStateException("DataCorrelationManager already initialized");
+        }
+        instance = new DataCorrelationManager(data);
+    }
+
+    /**
+     * Get the singleton instance. Must call initialize() first.
+     */
     public static DataCorrelationManager getInstance() {
         if (instance == null) {
-            synchronized (DataCorrelationManager.class) {
-                if (instance == null) {
-                    instance = new DataCorrelationManager();
-                }
-            }
+            throw new IllegalStateException("DataCorrelationManager not initialized. Call initialize() first.");
         }
         return instance;
     }
@@ -101,6 +146,14 @@ public class DataCorrelationManager {
 
     public List<String> getDriverIds() {
         return Collections.unmodifiableList(driverIds);
+    }
+
+    public Warehouse getWarehouse(String warehouseId) {
+        return warehouseMap.get(warehouseId);
+    }
+
+    public Vehicle getVehicle(String vehicleId) {
+        return vehicleMap.get(vehicleId);
     }
 
     public DestinationInfo getRandomDestination() {
@@ -190,61 +243,51 @@ public class DataCorrelationManager {
     // ========== Vehicle State Management ==========
 
     public void updateVehicleState(String vehicleId, String status, double latitude, double longitude) {
-        VehicleState state = activeVehicles.computeIfAbsent(vehicleId,
-            k -> new VehicleState(vehicleId));
+        VehicleRuntimeState state = activeVehicles.computeIfAbsent(vehicleId,
+            k -> new VehicleRuntimeState(vehicleId));
         state.setStatus(status);
         state.setLatitude(latitude);
         state.setLongitude(longitude);
     }
 
-    public VehicleState getVehicleState(String vehicleId) {
+    public VehicleRuntimeState getVehicleRuntimeState(String vehicleId) {
         return activeVehicles.get(vehicleId);
     }
 
     // ========== Helper Methods ==========
 
-    private List<String> generateSequentialIds(String prefix, int count, int padding) {
-        List<String> ids = new ArrayList<>(count);
-        for (int i = 1; i <= count; i++) {
-            ids.add(prefix + String.format("%0" + padding + "d", i));
-        }
-        return ids;
-    }
-
-    private Map<String, WarehouseLocation> initializeWarehouseLocations() {
+    private Map<String, WarehouseLocation> buildWarehouseLocations(List<Warehouse> warehouses) {
         Map<String, WarehouseLocation> locations = new HashMap<>();
-        locations.put("WH-RTM", new WarehouseLocation("WH-RTM", "Rotterdam", "Netherlands", 51.9225, 4.47917));
-        locations.put("WH-FRA", new WarehouseLocation("WH-FRA", "Frankfurt", "Germany", 50.1109, 8.68213));
-        locations.put("WH-BCN", new WarehouseLocation("WH-BCN", "Barcelona", "Spain", 41.3874, 2.16996));
-        locations.put("WH-WAW", new WarehouseLocation("WH-WAW", "Warsaw", "Poland", 52.2297, 21.0122));
-        locations.put("WH-STO", new WarehouseLocation("WH-STO", "Stockholm", "Sweden", 59.3293, 18.0686));
+        for (Warehouse w : warehouses) {
+            locations.put(w.getWarehouseId(), new WarehouseLocation(
+                w.getWarehouseId(),
+                w.getCity(),
+                w.getCountry(),
+                w.getLatitude(),
+                w.getLongitude()
+            ));
+        }
         return Collections.unmodifiableMap(locations);
     }
 
-    private List<DestinationInfo> initializeDestinations() {
-        // Major European cities (matching routes table)
-        return List.of(
-            new DestinationInfo("Amsterdam", "Netherlands", 52.3676, 4.9041),
-            new DestinationInfo("Berlin", "Germany", 52.5200, 13.4050),
-            new DestinationInfo("Paris", "France", 48.8566, 2.3522),
-            new DestinationInfo("Madrid", "Spain", 40.4168, -3.7038),
-            new DestinationInfo("Rome", "Italy", 41.9028, 12.4964),
-            new DestinationInfo("Vienna", "Austria", 48.2082, 16.3738),
-            new DestinationInfo("Prague", "Czech Republic", 50.0755, 14.4378),
-            new DestinationInfo("Budapest", "Hungary", 47.4979, 19.0402),
-            new DestinationInfo("Copenhagen", "Denmark", 55.6761, 12.5683),
-            new DestinationInfo("Oslo", "Norway", 59.9139, 10.7522),
-            new DestinationInfo("Helsinki", "Finland", 60.1699, 24.9384),
-            new DestinationInfo("Brussels", "Belgium", 50.8503, 4.3517),
-            new DestinationInfo("Zurich", "Switzerland", 47.3769, 8.5417),
-            new DestinationInfo("Milan", "Italy", 45.4642, 9.1900),
-            new DestinationInfo("Munich", "Germany", 48.1351, 11.5820),
-            new DestinationInfo("Hamburg", "Germany", 53.5511, 9.9937),
-            new DestinationInfo("Lyon", "France", 45.7640, 4.8357),
-            new DestinationInfo("Lisbon", "Portugal", 38.7223, -9.1393),
-            new DestinationInfo("Dublin", "Ireland", 53.3498, -6.2603),
-            new DestinationInfo("London", "United Kingdom", 51.5074, -0.1278)
-        );
+    private List<DestinationInfo> buildDestinations(List<Route> routes) {
+        // Get unique destinations from routes
+        Map<String, DestinationInfo> uniqueDestinations = new LinkedHashMap<>();
+        for (Route r : routes) {
+            String key = r.getDestinationCity() + "|" + r.getDestinationCountry();
+            if (!uniqueDestinations.containsKey(key)) {
+                // Note: Routes don't have lat/long for destinations, so we use placeholder values
+                // In a real system, we'd have a cities table with coordinates
+                uniqueDestinations.put(key, new DestinationInfo(
+                    r.getDestinationCity(),
+                    r.getDestinationCountry(),
+                    0.0,  // Latitude not available in routes table
+                    0.0   // Longitude not available in routes table
+                ));
+            }
+        }
+        LOG.info("Built {} unique destinations from routes", uniqueDestinations.size());
+        return new ArrayList<>(uniqueDestinations.values());
     }
 
     // ========== Inner Classes ==========
@@ -305,13 +348,13 @@ public class DataCorrelationManager {
         public long getCreatedAt() { return createdAt; }
     }
 
-    public static class VehicleState {
+    public static class VehicleRuntimeState {
         private final String vehicleId;
         private volatile String status;
         private volatile double latitude;
         private volatile double longitude;
 
-        public VehicleState(String vehicleId) {
+        public VehicleRuntimeState(String vehicleId) {
             this.vehicleId = vehicleId;
             this.status = "IDLE";
         }

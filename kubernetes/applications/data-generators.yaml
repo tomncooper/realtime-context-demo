@@ -24,6 +24,15 @@ spec:
               value: "events-cluster-kafka-bootstrap.smartship.svc.cluster.local:9092"
             - name: APICURIO_REGISTRY_URL
               value: "http://apicurio-registry.smartship.svc.cluster.local:8080/apis/registry/v2"
+            # PostgreSQL configuration for reference data loading
+            - name: POSTGRES_HOST
+              value: "postgresql.smartship.svc.cluster.local"
+            - name: POSTGRES_USER
+              value: "smartship"
+            - name: POSTGRES_PASSWORD
+              value: "smartship123"
+            - name: POSTGRES_DB
+              value: "smartship"
           resources:
             requests:
               memory: "768Mi"

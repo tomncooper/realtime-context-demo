@@ -1,6 +1,6 @@
 # SmartShip Logistics Implementation Plan
 
-**Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4-6 Pending | Phase 7-8 Pending (LLM Chatbot)
+**Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5-6 Pending | Phase 7-8 Pending (LLM Chatbot)
 
 ## Overview
 
@@ -73,6 +73,18 @@ realtime-context-demo/
 **Purpose:** Produce synthetic events to 4 Kafka topics at specified rates
 
 **Architecture:** Multi-threaded with `DataCorrelationManager` for referential integrity
+
+**Reference Data Loading (Single Source of Truth):**
+At startup, the data-generators module loads all reference data from PostgreSQL via `ReferenceDataLoader`:
+- Connects to PostgreSQL with retry logic (30 attempts, exponential backoff)
+- Loads 6 tables: warehouses, customers, vehicles, drivers, products, routes
+- Initializes `DataCorrelationManager` with loaded data
+- Eliminates hardcoded reference data duplication
+
+**Key Files:**
+- `ReferenceDataLoader.java` - PostgreSQL JDBC loader with retry
+- `model/*.java` - Reference data model classes (Warehouse, Customer, Vehicle, Driver, Product, Route, ReferenceData)
+- `DataCorrelationManager.java` - Singleton initialized from loaded data
 
 **Four generator threads:**
 
@@ -682,9 +694,12 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 
 **Key Implementation Decisions:**
 - Used **consistent event rates** (deferred time-based peak/off-peak to later phase)
-- Implemented **singleton DataCorrelationManager** with in-memory state matching PostgreSQL seed data
+- Implemented **singleton DataCorrelationManager** initialized from PostgreSQL at startup (single source of truth)
+- Created **ReferenceDataLoader** service with JDBC connection and retry logic (30 attempts, exponential backoff)
+- Added **model classes** in `data-generators/src/main/java/com/smartship/generators/model/` for type-safe reference data
 - Used **generate_series()** in PostgreSQL for efficient bulk seed data generation
 - Maintained **backward compatibility** with existing streams-processor (new fields are additions)
+- **PostgreSQL is the single source of truth** for all reference data (warehouses, customers, vehicles, drivers, products, routes)
 
 ### Phase 3: Complete Kafka Streams State Stores ✅ COMPLETED
 **Status:** ✅ Complete
@@ -723,23 +738,50 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 - Maintained **6-hour retention** for windowed stores
 - Note: `order.status` topic consumption deferred to Phase 4 (hybrid queries with PostgreSQL joins)
 
-### Phase 4: Complete Query API ⏭️ PENDING
-**Status:** Pending
+### Phase 4: Complete Query API ✅ COMPLETED
+**Status:** ✅ Complete
+**Timeline:** Completed December 2025
 **Goal:** Full LLM query capability with multi-source queries
 
-**Scope:**
-- Add /api/query/reference endpoint for PostgreSQL queries
-- Add /api/query/hybrid endpoint for multi-source queries
-- Implement PostgresQueryService with Quarkus reactive PostgreSQL client
-- Implement QueryOrchestrationService for joining data
-- Consume order.status topic and implement order-related state stores
-- Enhance OpenAPI documentation
+**Scope (Implemented):**
+- ✅ **PostgreSQL Integration:** 17 reference data endpoints via `ReferenceDataResource`
+- ✅ **Hybrid Queries:** 7 endpoints combining Kafka Streams + PostgreSQL via `HybridQueryResource`
+- ✅ **Order State Stores:** 3 new state stores consuming `order.status` topic
+- ✅ **PostgresQueryService:** Quarkus reactive PostgreSQL client with Mutiny
+- ✅ **QueryOrchestrationService:** Multi-source query orchestration with error handling
+- ✅ **HybridQueryResult:** Result wrapper with `warnings` field for data quality indicators
+- ✅ **Enhanced OpenAPI:** Full documentation for all endpoints
 
-**Building on Phase 3:**
-- Extend query-api module with PostgreSQL integration
-- Add quarkus-reactive-pg-client dependency
-- Implement hybrid queries combining Kafka Streams + PostgreSQL data
-- Add order.status topic consumption to LogisticsTopology
+**Tasks Completed:**
+1. ✅ Created `PostgresQueryService.java` with Quarkus reactive PostgreSQL client
+2. ✅ Created `ReferenceDataResource.java` with 17 reference data endpoints
+3. ✅ Created `HybridQueryResource.java` with 7 hybrid query endpoints
+4. ✅ Created `QueryOrchestrationService.java` for multi-source query orchestration
+5. ✅ Extended `LogisticsTopology.java` with 3 order state stores (order-current-state, orders-by-customer, order-sla-tracking)
+6. ✅ Created model classes: `EnrichedCustomerOverview`, `EnrichedVehicleState`, `EnrichedLateShipment`, `HybridQueryResult`
+7. ✅ Created reference DTOs: `CustomerDto`, `WarehouseDto`, `VehicleDto`, `DriverDto`, `RouteDto`, `ProductDto`
+8. ✅ Added `quarkus-reactive-pg-client` dependency
+9. ✅ Added graceful error handling with `warnings` field for Kafka Streams connection issues
+10. ✅ Updated validation script with correct ID formats
+
+**Deliverables (Achieved):**
+- ✅ 9 state stores total (6 original + 3 order stores)
+- ✅ 17 PostgreSQL reference data endpoints
+- ✅ 7 hybrid query endpoints combining real-time and reference data
+- ✅ Graceful error handling with data quality warnings
+- ✅ Full OpenAPI/Swagger documentation
+
+**Key Implementation Decisions:**
+- Used **Mutiny Uni<T>** for non-blocking reactive PostgreSQL queries
+- Added **warnings field** to `HybridQueryResult` to indicate when data sources are unavailable
+- Implemented **try-catch blocks** around all Kafka Streams calls with graceful fallback
+- Used **builder pattern** for enriched model classes
+
+**ID Formats (Critical for Queries):**
+- Customers: `CUST-0001` through `CUST-0200` (4 digits, zero-padded)
+- Vehicles: `VEH-001` through `VEH-050` (3 digits)
+- Drivers: `DRV-001` through `DRV-075` (3 digits)
+- Warehouses: `WH-RTM`, `WH-FRA`, `WH-BCN`, `WH-WAW`, `WH-STO`
 
 ### Phase 5: Refinement & Production-Ready ⏭️ PENDING
 **Status:** Pending
@@ -748,7 +790,6 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 **Scope:**
 - Build Quarkus Query API as **native image** (target: <100ms startup, <128Mi memory)
 - Add advanced features (exception injection, time-based event rates, realistic geography)
-- Create Kustomize cloud overlay with HPA
 - Implement persistent storage for Apicurio Registry
 - Comprehensive testing (unit, integration, performance)
 - Enhanced documentation and troubleshooting guides
@@ -756,7 +797,6 @@ psql -h localhost -U smartship -d smartship -c "SELECT COUNT(*) FROM customers;"
 **Building on Phase 1:**
 - Create query-api native image build
 - Update query-api.yaml with native image resources
-- Add kubernetes/overlays/cloud/ for production deployment
 - Implement comprehensive test suite
 
 ### Phase 6: Demo Optimization & Polish ⏭️ PENDING
@@ -952,40 +992,43 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 ### Phase 1-3 (Core Infrastructure)
 1. **pom.xml** - Parent POM with dependency management
 2. **schemas/src/main/avro/shipment-event.avsc** - Core Avro schema (+ 3 others)
-3. **data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java** - Central coordinator
-4. **streams-processor/src/main/java/com/smartship/streams/topology/LogisticsTopology.java** - Kafka Streams topology
-5. **streams-processor/src/main/java/com/smartship/streams/InteractiveQueryServer.java** - Interactive Queries HTTP server
-6. **streams-processor/src/main/java/com/smartship/streams/StreamsMetadataResponse.java** - StreamsMetadata DTO
-7. **query-api/src/main/java/com/smartship/api/QueryResource.java** - Quarkus JAX-RS endpoint
-8. **query-api/src/main/java/com/smartship/api/services/StreamsInstanceDiscoveryService.java** - Instance discovery
-9. **query-api/src/main/java/com/smartship/api/model/StreamsInstanceMetadata.java** - Instance metadata DTO
-10. **kubernetes/applications/streams-processor.yaml** - StatefulSet + Headless Service
-11. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
-12. **kubernetes/infrastructure/init.sql** - PostgreSQL DDL
+3. **data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java** - Central coordinator (initialized from PostgreSQL)
+4. **data-generators/src/main/java/com/smartship/generators/ReferenceDataLoader.java** - PostgreSQL JDBC loader with retry
+5. **data-generators/src/main/java/com/smartship/generators/model/*.java** - Reference data model classes
+6. **streams-processor/src/main/java/com/smartship/streams/topology/LogisticsTopology.java** - Kafka Streams topology
+7. **streams-processor/src/main/java/com/smartship/streams/InteractiveQueryServer.java** - Interactive Queries HTTP server
+8. **streams-processor/src/main/java/com/smartship/streams/StreamsMetadataResponse.java** - StreamsMetadata DTO
+9. **query-api/src/main/java/com/smartship/api/QueryResource.java** - Quarkus JAX-RS endpoint
+10. **query-api/src/main/java/com/smartship/api/services/StreamsInstanceDiscoveryService.java** - Instance discovery
+11. **query-api/src/main/java/com/smartship/api/model/StreamsInstanceMetadata.java** - Instance metadata DTO
+12. **kubernetes/applications/streams-processor.yaml** - StatefulSet + Headless Service
+13. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
+14. **kubernetes/infrastructure/init.sql** - PostgreSQL DDL (single source of truth for reference data)
 
 ### Phase 7 (LLM Chatbot)
-13. **query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java** - AI service interface
-14. **query-api/src/main/java/com/smartship/api/ai/ChatResource.java** - Chat REST endpoints
-15. **query-api/src/main/java/com/smartship/api/ai/WebSocketChatEndpoint.java** - WebSocket streaming
-16. **query-api/src/main/java/com/smartship/api/ai/tools/*.java** - 6 tool classes for LLM function calling
-17. **query-api/src/main/java/com/smartship/api/ai/guardrails/LogisticsInScopeGuard.java** - Input guardrail
-18. **query-api/src/main/java/com/smartship/api/ai/memory/InMemoryChatMemoryStore.java** - Session memory
-19. **kubernetes/infrastructure/ollama.yaml** - Ollama StatefulSet + Service
+15. **query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java** - AI service interface
+16. **query-api/src/main/java/com/smartship/api/ai/ChatResource.java** - Chat REST endpoints
+17. **query-api/src/main/java/com/smartship/api/ai/WebSocketChatEndpoint.java** - WebSocket streaming
+18. **query-api/src/main/java/com/smartship/api/ai/tools/*.java** - 6 tool classes for LLM function calling
+19. **query-api/src/main/java/com/smartship/api/ai/guardrails/LogisticsInScopeGuard.java** - Input guardrail
+20. **query-api/src/main/java/com/smartship/api/ai/memory/InMemoryChatMemoryStore.java** - Session memory
+21. **kubernetes/infrastructure/ollama.yaml** - Ollama StatefulSet + Service
 
 ### Phase 8 (Advanced LLM Features)
-20. **query-api/src/main/java/com/smartship/api/ai/guardrails/DataFactualityGuard.java** - Output guardrail
-21. **query-api/src/main/java/com/smartship/api/ai/guardrails/ResponseFormatGuard.java** - Format guardrail
-22. **query-api/src/main/java/com/smartship/api/ai/tools/AnalyticsTools.java** - Cross-source analytics
-23. **query-api/src/main/java/com/smartship/api/ai/observability/ChatAuditObserver.java** - Audit logging
-24. **docs/demo-conversations.md** - Demo conversation examples
+22. **query-api/src/main/java/com/smartship/api/ai/guardrails/DataFactualityGuard.java** - Output guardrail
+23. **query-api/src/main/java/com/smartship/api/ai/guardrails/ResponseFormatGuard.java** - Format guardrail
+24. **query-api/src/main/java/com/smartship/api/ai/tools/AnalyticsTools.java** - Cross-source analytics
+25. **query-api/src/main/java/com/smartship/api/ai/observability/ChatAuditObserver.java** - Audit logging
+26. **docs/demo-conversations.md** - Demo conversation examples
 
 ## Next Steps
 
 ✅ **Phase 1 COMPLETED** - Minimal end-to-end system with 1 topic, 1 state store.
 ✅ **Phase 2 COMPLETED** - All 4 topics producing events with full-scale reference data.
 ✅ **Phase 3 COMPLETED** - All 6 Kafka Streams state stores consuming 3 topics.
+✅ **Phase 4 COMPLETED** - Full LLM query capability with 9 state stores, PostgreSQL integration, and hybrid queries.
 
-**To deploy Phase 3:**
+**To deploy Phase 4:**
 ```bash
 cd /home/tcooper/repos/redhat/realtime-context-demo
 
@@ -1001,12 +1044,11 @@ python3 scripts/02-build-all.py
 # 4. Deploy applications
 python3 scripts/03-deploy-apps.py
 
-# 5. Validate deployment (tests all 6 state stores)
+# 5. Validate deployment (tests all 9 state stores, reference data, and hybrid queries)
 python3 scripts/04-validate.py
 ```
 
 **Future Implementation:**
-- Phase 4 will complete the Query API with PostgreSQL hybrid queries and order.status consumption
 - Phase 5 will add native image builds and production hardening
 - Phase 6 will add demo optimization and Grafana dashboards
 - Phase 7 will add LLM chatbot integration with Quarkus LangChain4j and Ollama
@@ -1065,3 +1107,37 @@ python3 scripts/04-validate.py
 4. `late-shipments` - Shipments past expected delivery (KeyValue)
 5. `warehouse-realtime-metrics` - 15-min operation metrics (Windowed)
 6. `hourly-delivery-performance` - 1-hour delivery stats (Windowed)
+
+## Phase 4 Success Metrics (All Achieved)
+
+✅ **Functional Requirements:**
+- 9 Kafka Streams state stores operational (6 original + 3 order stores)
+- order.status topic consumed with order tracking state stores
+- PostgreSQL reference data accessible via 17 REST endpoints
+- Hybrid queries combining Kafka Streams + PostgreSQL data
+- Graceful error handling with data quality warnings
+
+✅ **Technical Requirements:**
+- Quarkus reactive PostgreSQL client with Mutiny Uni<T>
+- HybridQueryResult wrapper with sources and warnings metadata
+- QueryOrchestrationService for multi-source query orchestration
+- Try-catch blocks around all Kafka Streams calls with fallback
+- Builder pattern for enriched model classes
+
+✅ **New State Stores (Phase 4):**
+7. `order-current-state` - Current state per order (KeyValue)
+8. `orders-by-customer` - Aggregated order stats per customer (KeyValue)
+9. `order-sla-tracking` - Orders at SLA risk (KeyValue)
+
+✅ **New API Endpoints (Phase 4):**
+- 17 reference data endpoints (`/api/reference/*`)
+- 7 hybrid query endpoints (`/api/hybrid/*`)
+- 6 order state query endpoints (`/api/orders/*`)
+
+✅ **Key Files Created:**
+- `query-api/src/main/java/com/smartship/api/services/PostgresQueryService.java`
+- `query-api/src/main/java/com/smartship/api/services/QueryOrchestrationService.java`
+- `query-api/src/main/java/com/smartship/api/ReferenceDataResource.java`
+- `query-api/src/main/java/com/smartship/api/HybridQueryResource.java`
+- `query-api/src/main/java/com/smartship/api/model/hybrid/*.java` (enriched models)
+- `query-api/src/main/java/com/smartship/api/model/reference/*.java` (DTOs)

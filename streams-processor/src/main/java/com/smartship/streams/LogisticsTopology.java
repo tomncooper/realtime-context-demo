@@ -5,6 +5,8 @@ import com.smartship.logistics.events.ShipmentEvent;
 import com.smartship.logistics.events.ShipmentEventType;
 import com.smartship.logistics.events.VehicleTelemetry;
 import com.smartship.logistics.events.WarehouseOperation;
+import com.smartship.logistics.events.OrderStatus;
+import com.smartship.logistics.events.OrderStatusType;
 import com.smartship.streams.model.*;
 import com.smartship.streams.serde.JsonSerde;
 import io.apicurio.registry.serde.avro.AvroSerde;
@@ -32,14 +34,20 @@ public class LogisticsTopology {
     private static final String SHIPMENT_EVENTS_TOPIC = "shipment.events";
     private static final String VEHICLE_TELEMETRY_TOPIC = "vehicle.telemetry";
     private static final String WAREHOUSE_OPERATIONS_TOPIC = "warehouse.operations";
+    private static final String ORDER_STATUS_TOPIC = "order.status";
 
-    // State store names
+    // State store names - Shipment/Vehicle/Warehouse
     public static final String ACTIVE_SHIPMENTS_BY_STATUS_STORE = "active-shipments-by-status";
     public static final String VEHICLE_STATE_STORE = "vehicle-current-state";
     public static final String SHIPMENTS_BY_CUSTOMER_STORE = "shipments-by-customer";
     public static final String WAREHOUSE_METRICS_STORE = "warehouse-realtime-metrics";
     public static final String LATE_SHIPMENTS_STORE = "late-shipments";
     public static final String HOURLY_PERFORMANCE_STORE = "hourly-delivery-performance";
+
+    // State store names - Orders (Phase 4)
+    public static final String ORDER_STATE_STORE = "order-current-state";
+    public static final String ORDERS_BY_CUSTOMER_STORE = "orders-by-customer";
+    public static final String ORDER_SLA_TRACKING_STORE = "order-sla-tracking";
 
     // Backward compatibility alias
     public static final String STATE_STORE_NAME = ACTIVE_SHIPMENTS_BY_STATUS_STORE;
@@ -57,7 +65,7 @@ public class LogisticsTopology {
      * @return Configured topology
      */
     public static Topology build() {
-        LOG.info("Building Kafka Streams topology for Phase 3 - 6 state stores");
+        LOG.info("Building Kafka Streams topology for Phase 4 - 9 state stores");
 
         StreamsBuilder builder = new StreamsBuilder();
 
@@ -65,6 +73,7 @@ public class LogisticsTopology {
         AvroSerde<ShipmentEvent> shipmentEventSerde = createAvroSerde();
         AvroSerde<VehicleTelemetry> vehicleTelemetrySerde = createAvroSerde();
         AvroSerde<WarehouseOperation> warehouseOperationSerde = createAvroSerde();
+        AvroSerde<OrderStatus> orderStatusSerde = createAvroSerde();
 
         // Configure JSON Serdes for state store values
         JsonSerde<VehicleState> vehicleStateSerde = new JsonSerde<>(VehicleState.class);
@@ -72,6 +81,9 @@ public class LogisticsTopology {
         JsonSerde<WarehouseMetrics> warehouseMetricsSerde = new JsonSerde<>(WarehouseMetrics.class);
         JsonSerde<LateShipmentDetails> lateShipmentSerde = new JsonSerde<>(LateShipmentDetails.class);
         JsonSerde<DeliveryStats> deliveryStatsSerde = new JsonSerde<>(DeliveryStats.class);
+        JsonSerde<OrderState> orderStateSerde = new JsonSerde<>(OrderState.class);
+        JsonSerde<CustomerOrderStats> customerOrderStatsSerde = new JsonSerde<>(CustomerOrderStats.class);
+        JsonSerde<OrderSLATracker> orderSLATrackerSerde = new JsonSerde<>(OrderSLATracker.class);
 
         // ===========================================
         // Stream from shipment.events topic
@@ -127,8 +139,29 @@ public class LogisticsTopology {
         // State Store 6: warehouse-realtime-metrics (windowed metrics)
         buildWarehouseMetricsStore(warehouseStream, warehouseOperationSerde, warehouseMetricsSerde);
 
+        // ===========================================
+        // Stream from order.status topic (Phase 4)
+        // ===========================================
+        KStream<String, OrderStatus> orderStream = builder.stream(
+            ORDER_STATUS_TOPIC,
+            Consumed.with(Serdes.String(), orderStatusSerde)
+        );
+
+        orderStream.peek((key, value) ->
+            LOG.debug("Processing order status: {} - {}", key, value.getStatus())
+        );
+
+        // State Store 7: order-current-state (latest state per order)
+        buildOrderStateStore(orderStream, orderStatusSerde, orderStateSerde);
+
+        // State Store 8: orders-by-customer (aggregated stats per customer)
+        buildOrdersByCustomerStore(orderStream, orderStatusSerde, customerOrderStatsSerde);
+
+        // State Store 9: order-sla-tracking (orders at SLA risk)
+        buildOrderSLATrackingStore(orderStream, orderStatusSerde, orderSLATrackerSerde);
+
         Topology topology = builder.build();
-        LOG.info("Topology built successfully with 6 state stores");
+        LOG.info("Topology built successfully with 9 state stores");
         LOG.info("Topology description:\n{}", topology.describe());
 
         return topology;
@@ -332,6 +365,100 @@ public class LogisticsTopology {
                 metrics.totalOperations(),
                 metrics.errorCount())
         );
+    }
+
+    // ===========================================
+    // Order State Stores (Phase 4)
+    // ===========================================
+
+    /**
+     * State Store 7: Latest state per order.
+     */
+    private static void buildOrderStateStore(
+            KStream<String, OrderStatus> orderStream,
+            AvroSerde<OrderStatus> orderStatusSerde,
+            JsonSerde<OrderState> orderStateSerde) {
+
+        LOG.info("Building state store: {}", ORDER_STATE_STORE);
+
+        KTable<String, OrderState> orderStates = orderStream
+            .groupByKey(Grouped.with(Serdes.String(), orderStatusSerde))
+            .aggregate(
+                () -> null,
+                (orderId, event, current) -> {
+                    if (current == null) {
+                        return OrderState.from(event);
+                    }
+                    return current.update(event);
+                },
+                Materialized.<String, OrderState, KeyValueStore<Bytes, byte[]>>as(ORDER_STATE_STORE)
+                    .withKeySerde(Serdes.String())
+                    .withValueSerde(orderStateSerde)
+            );
+
+        orderStates.toStream().peek((orderId, state) -> {
+            if (state != null) {
+                LOG.debug("Updated order {} state: {}", orderId, state.status());
+            }
+        });
+    }
+
+    /**
+     * State Store 8: Aggregated order statistics per customer.
+     */
+    private static void buildOrdersByCustomerStore(
+            KStream<String, OrderStatus> orderStream,
+            AvroSerde<OrderStatus> orderStatusSerde,
+            JsonSerde<CustomerOrderStats> customerOrderStatsSerde) {
+
+        LOG.info("Building state store: {}", ORDERS_BY_CUSTOMER_STORE);
+
+        KTable<String, CustomerOrderStats> customerStats = orderStream
+            .groupBy(
+                (key, value) -> value.getCustomerId(),
+                Grouped.with(Serdes.String(), orderStatusSerde)
+            )
+            .aggregate(
+                CustomerOrderStats::empty,
+                (customerId, event, stats) -> stats.update(event),
+                Materialized.<String, CustomerOrderStats, KeyValueStore<Bytes, byte[]>>as(ORDERS_BY_CUSTOMER_STORE)
+                    .withKeySerde(Serdes.String())
+                    .withValueSerde(customerOrderStatsSerde)
+            );
+
+        customerStats.toStream().peek((customerId, stats) ->
+            LOG.debug("Updated customer {} order stats: {} total orders", customerId, stats.totalOrders())
+        );
+    }
+
+    /**
+     * State Store 9: Track orders at risk of SLA breach.
+     */
+    private static void buildOrderSLATrackingStore(
+            KStream<String, OrderStatus> orderStream,
+            AvroSerde<OrderStatus> orderStatusSerde,
+            JsonSerde<OrderSLATracker> orderSLATrackerSerde) {
+
+        LOG.info("Building state store: {}", ORDER_SLA_TRACKING_STORE);
+
+        // Filter for orders that should be tracked (at risk or breached)
+        KTable<String, OrderSLATracker> slaTracking = orderStream
+            .filter((key, value) -> OrderSLATracker.shouldTrack(value))
+            .groupByKey(Grouped.with(Serdes.String(), orderStatusSerde))
+            .aggregate(
+                () -> null,
+                (orderId, event, current) -> OrderSLATracker.from(event),
+                Materialized.<String, OrderSLATracker, KeyValueStore<Bytes, byte[]>>as(ORDER_SLA_TRACKING_STORE)
+                    .withKeySerde(Serdes.String())
+                    .withValueSerde(orderSLATrackerSerde)
+            );
+
+        slaTracking.toStream().peek((orderId, tracker) -> {
+            if (tracker != null) {
+                LOG.debug("Order {} SLA tracking: {} minutes to SLA, at_risk={}, breached={}",
+                    orderId, tracker.timeToSlaMinutes(), tracker.isAtRisk(), tracker.isBreached());
+            }
+        });
     }
 
     /**

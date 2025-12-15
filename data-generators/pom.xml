@@ -40,6 +40,13 @@
             <artifactId>apicurio-registry-avro-serde-kafka</artifactId>
         </dependency>
 
+        <!-- PostgreSQL JDBC for reference data loading -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+        </dependency>
+
         <!-- Logging -->
         <dependency>
             <groupId>org.slf4j</groupId>

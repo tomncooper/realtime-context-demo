@@ -27,6 +27,15 @@ spec:
               value: "streams-processor-headless.smartship.svc.cluster.local"
             - name: STREAMS_PROCESSOR_PORT
               value: "7070"
+            # PostgreSQL configuration for reference data
+            - name: POSTGRES_HOST
+              value: "postgresql.smartship.svc.cluster.local"
+            - name: POSTGRES_USER
+              value: "smartship"
+            - name: POSTGRES_PASSWORD
+              value: "smartship123"
+            - name: POSTGRES_DB
+              value: "smartship"
           resources:
             requests:
               memory: "512Mi"

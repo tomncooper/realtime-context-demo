@@ -22,11 +22,10 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * HTTP server for Interactive Queries on Kafka Streams state stores.
- * Phase 3: Supports all 6 state stores including windowed stores.
+ * Phase 4: Supports all 9 state stores including order state stores.
  */
 public class InteractiveQueryServer {
 
@@ -67,6 +66,11 @@ public class InteractiveQueryServer {
         server.createContext("/state/late-shipments", this::handleLateShipments);
         server.createContext("/state/warehouse-realtime-metrics", this::handleWarehouseMetrics);
         server.createContext("/state/hourly-delivery-performance", this::handleHourlyPerformance);
+
+        // Order state store endpoints (Phase 4)
+        server.createContext("/state/order-current-state", this::handleOrderCurrentState);
+        server.createContext("/state/orders-by-customer", this::handleOrdersByCustomer);
+        server.createContext("/state/order-sla-tracking", this::handleOrderSLATracking);
 
         server.setExecutor(null); // Use default executor
         server.start();
@@ -109,7 +113,7 @@ public class InteractiveQueryServer {
 
             Collection<StreamsMetadata> storeMetadata = metadata.stream()
                 .filter(m -> m.stateStoreNames().contains(storeName))
-                .collect(Collectors.toList());
+                .toList();
 
             List<Map<String, Object>> result = new ArrayList<>();
             for (StreamsMetadata meta : storeMetadata) {
@@ -501,6 +505,153 @@ public class InteractiveQueryServer {
     }
 
     // ===========================================
+    // State Store 7: order-current-state (Phase 4)
+    // ===========================================
+
+    private void handleOrderCurrentState(HttpExchange exchange) throws IOException {
+        try {
+            String path = exchange.getRequestURI().getPath();
+            String[] parts = path.split("/");
+
+            ReadOnlyKeyValueStore<String, OrderState> store = streams.store(
+                StoreQueryParameters.fromNameAndType(
+                    LogisticsTopology.ORDER_STATE_STORE,
+                    QueryableStoreTypes.keyValueStore()
+                )
+            );
+
+            if (parts.length > 3 && !parts[3].isEmpty()) {
+                // Query specific order
+                String orderId = parts[3];
+                OrderState state = store.get(orderId);
+
+                if (state == null) {
+                    sendError(exchange, 404, "Order not found: " + orderId);
+                    return;
+                }
+
+                sendJsonResponse(exchange, state);
+            } else {
+                // Query all orders
+                List<OrderState> orders = new ArrayList<>();
+                try (KeyValueIterator<String, OrderState> iter = store.all()) {
+                    while (iter.hasNext()) {
+                        OrderState state = iter.next().value;
+                        if (state != null) {
+                            orders.add(state);
+                        }
+                    }
+                }
+                sendJsonResponse(exchange, orders);
+            }
+
+            LOG.debug("Served query: {}", exchange.getRequestURI());
+
+        } catch (Exception e) {
+            LOG.error("Error processing order-current-state query", e);
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ===========================================
+    // State Store 8: orders-by-customer (Phase 4)
+    // ===========================================
+
+    private void handleOrdersByCustomer(HttpExchange exchange) throws IOException {
+        try {
+            String path = exchange.getRequestURI().getPath();
+            String[] parts = path.split("/");
+
+            ReadOnlyKeyValueStore<String, CustomerOrderStats> store = streams.store(
+                StoreQueryParameters.fromNameAndType(
+                    LogisticsTopology.ORDERS_BY_CUSTOMER_STORE,
+                    QueryableStoreTypes.keyValueStore()
+                )
+            );
+
+            if (parts.length > 3 && !parts[3].isEmpty()) {
+                // Query specific customer
+                String customerId = parts[3];
+                CustomerOrderStats stats = store.get(customerId);
+
+                if (stats == null) {
+                    sendError(exchange, 404, "Customer orders not found: " + customerId);
+                    return;
+                }
+
+                sendJsonResponse(exchange, stats);
+            } else {
+                // Query all customers
+                List<CustomerOrderStats> customers = new ArrayList<>();
+                try (KeyValueIterator<String, CustomerOrderStats> iter = store.all()) {
+                    while (iter.hasNext()) {
+                        CustomerOrderStats stats = iter.next().value;
+                        if (stats != null) {
+                            customers.add(stats);
+                        }
+                    }
+                }
+                sendJsonResponse(exchange, customers);
+            }
+
+            LOG.debug("Served query: {}", exchange.getRequestURI());
+
+        } catch (Exception e) {
+            LOG.error("Error processing orders-by-customer query", e);
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ===========================================
+    // State Store 9: order-sla-tracking (Phase 4)
+    // ===========================================
+
+    private void handleOrderSLATracking(HttpExchange exchange) throws IOException {
+        try {
+            String path = exchange.getRequestURI().getPath();
+            String[] parts = path.split("/");
+
+            ReadOnlyKeyValueStore<String, OrderSLATracker> store = streams.store(
+                StoreQueryParameters.fromNameAndType(
+                    LogisticsTopology.ORDER_SLA_TRACKING_STORE,
+                    QueryableStoreTypes.keyValueStore()
+                )
+            );
+
+            if (parts.length > 3 && !parts[3].isEmpty()) {
+                // Query specific order
+                String orderId = parts[3];
+                OrderSLATracker tracker = store.get(orderId);
+
+                if (tracker == null) {
+                    sendError(exchange, 404, "Order SLA tracking not found: " + orderId);
+                    return;
+                }
+
+                sendJsonResponse(exchange, tracker);
+            } else {
+                // Query all at-risk orders
+                List<OrderSLATracker> atRiskOrders = new ArrayList<>();
+                try (KeyValueIterator<String, OrderSLATracker> iter = store.all()) {
+                    while (iter.hasNext()) {
+                        OrderSLATracker tracker = iter.next().value;
+                        if (tracker != null) {
+                            atRiskOrders.add(tracker);
+                        }
+                    }
+                }
+                sendJsonResponse(exchange, atRiskOrders);
+            }
+
+            LOG.debug("Served query: {}", exchange.getRequestURI());
+
+        } catch (Exception e) {
+            LOG.error("Error processing order-sla-tracking query", e);
+            sendError(exchange, 500, e.getMessage());
+        }
+    }
+
+    // ===========================================
     // Helper Methods
     // ===========================================
 
@@ -540,5 +691,11 @@ public class InteractiveQueryServer {
         LOG.info("  GET /state/warehouse-realtime-metrics/{{warehouseId}}");
         LOG.info("  GET /state/hourly-delivery-performance");
         LOG.info("  GET /state/hourly-delivery-performance/{{warehouseId}}");
+        LOG.info("  GET /state/order-current-state");
+        LOG.info("  GET /state/order-current-state/{{orderId}}");
+        LOG.info("  GET /state/orders-by-customer");
+        LOG.info("  GET /state/orders-by-customer/{{customerId}}");
+        LOG.info("  GET /state/order-sla-tracking");
+        LOG.info("  GET /state/order-sla-tracking/{{orderId}}");
     }
 }

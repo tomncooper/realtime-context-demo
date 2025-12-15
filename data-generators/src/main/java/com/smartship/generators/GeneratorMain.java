@@ -1,5 +1,6 @@
 package com.smartship.generators;
 
+import com.smartship.generators.model.ReferenceData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,8 +17,21 @@ public class GeneratorMain {
         LOG.info("SmartShip Logistics - Phase 2 Data Generators");
         LOG.info("=".repeat(60));
 
-        // Initialize correlation manager first (singleton)
+        // Load reference data from PostgreSQL
+        LOG.info("\n=== Loading Reference Data from PostgreSQL ===");
+        ReferenceDataLoader loader = new ReferenceDataLoader();
+        ReferenceData referenceData = loader.loadAllReferenceData();
+        LOG.info("Reference data loaded: {} warehouses, {} customers, {} vehicles, {} drivers, {} products, {} routes",
+            referenceData.getWarehouses().size(),
+            referenceData.getCustomers().size(),
+            referenceData.getVehicles().size(),
+            referenceData.getDrivers().size(),
+            referenceData.getProducts().size(),
+            referenceData.getRoutes().size());
+
+        // Initialize correlation manager with loaded data
         LOG.info("\n=== Initializing DataCorrelationManager ===");
+        DataCorrelationManager.initialize(referenceData);
         DataCorrelationManager correlationManager = DataCorrelationManager.getInstance();
         LOG.info("DataCorrelationManager ready");
 

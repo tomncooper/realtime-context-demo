@@ -75,6 +75,12 @@
             <artifactId>quarkus-cache</artifactId>
         </dependency>
 
+        <!-- PostgreSQL Reactive Client -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-reactive-pg-client</artifactId>
+        </dependency>
+
         <!-- Testing -->
         <dependency>
             <groupId>io.quarkus</groupId>

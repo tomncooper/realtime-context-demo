@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate SmartShip deployment - Phase 3 with all 6 state stores."""
+"""Validate SmartShip deployment - Phase 4 with all 9 state stores and hybrid queries."""
 import json
 import sys
 import time
@@ -32,8 +32,8 @@ def port_forward_and_test(service: str, port: int, test_func):
 
 
 def test_all_state_stores():
-    """Test all 6 Kafka Streams state stores via Interactive Queries."""
-    print("\n--- Testing all 6 state stores ---")
+    """Test all 9 Kafka Streams state stores via Interactive Queries."""
+    print("\n--- Testing all 9 state stores ---")
 
     # State Store 1: active-shipments-by-status
     print("\n1. active-shipments-by-status:")
@@ -133,6 +133,54 @@ def test_all_state_stores():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
+    # State Store 7: order-current-state (Phase 4)
+    print("\n7. order-current-state:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:7070/state/order-current-state'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            print(f"   Orders tracked: {len(data)}")
+            if data:
+                sample = data[0]
+                print(f"   Sample order: {sample.get('order_id', 'N/A')} - status: {sample.get('status', 'N/A')}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # State Store 8: orders-by-customer (Phase 4)
+    print("\n8. orders-by-customer:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:7070/state/orders-by-customer'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            print(f"   Customers with orders: {len(data)}")
+            if data:
+                sample = data[0]
+                print(f"   Sample customer: {sample.get('customer_id', 'N/A')} - {sample.get('total_orders', 0)} orders")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # State Store 9: order-sla-tracking (Phase 4)
+    print("\n9. order-sla-tracking:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:7070/state/order-sla-tracking'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            print(f"   Orders at SLA risk: {len(data)}")
+            if data:
+                sample = data[0]
+                print(f"   Sample: {sample.get('order_id', 'N/A')} - {sample.get('time_to_sla_minutes', 0)} min to SLA")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
 
 def test_metadata_endpoints():
     """Test Kafka Streams metadata endpoints (for multi-instance support)."""
@@ -145,7 +193,10 @@ def test_metadata_endpoints():
         'shipments-by-customer',
         'late-shipments',
         'warehouse-realtime-metrics',
-        'hourly-delivery-performance'
+        'hourly-delivery-performance',
+        'order-current-state',
+        'orders-by-customer',
+        'order-sla-tracking'
     ]
 
     for store in state_stores:
@@ -246,8 +297,47 @@ def test_query_api():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
+    # Test order state endpoints (Phase 4)
+    print("\n7. Order states:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/orders/state'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            print(f"   Orders: {data.get('count', 0)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test customer order stats endpoints (Phase 4)
+    print("\n8. Customer order stats:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/orders/by-customer/all'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            print(f"   Customers with order stats: {data.get('count', 0)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test SLA risk endpoints (Phase 4)
+    print("\n9. Orders at SLA risk:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/orders/sla-risk'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            print(f"   At-risk orders: {data.get('count', 0)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
     # Test health endpoint
-    print("\n7. Health check:")
+    print("\n10. Health check:")
     result = run_command(
         ['curl', '-s', 'http://localhost:8080/api/health'],
         capture_output=True
@@ -259,6 +349,177 @@ def test_query_api():
             print(f"   Phase: {data.get('phase', 'N/A')}")
             stores = data.get('state_stores', [])
             print(f"   State stores: {len(stores)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+
+def test_reference_data_api():
+    """Test PostgreSQL reference data endpoints (Phase 4)."""
+    print("\n--- Testing Reference Data API (PostgreSQL) ---")
+
+    # Test warehouses endpoint
+    print("\n1. Warehouses:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/reference/warehouses'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            warehouses = data.get('warehouses', [])
+            print(f"   Warehouses: {len(warehouses)}")
+            if warehouses:
+                sample = warehouses[0]
+                print(f"   Sample: {sample.get('warehouse_id', 'N/A')} - {sample.get('name', 'N/A')} ({sample.get('city', 'N/A')})")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test customers endpoint
+    print("\n2. Customers:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/reference/customers?limit=10'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            customers = data.get('customers', [])
+            print(f"   Customers returned: {len(customers)}")
+            if customers:
+                sample = customers[0]
+                print(f"   Sample: {sample.get('customer_id', 'N/A')} - {sample.get('company_name', 'N/A')} (SLA: {sample.get('sla_tier', 'N/A')})")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test vehicles endpoint
+    print("\n3. Vehicles:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/reference/vehicles'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            vehicles = data.get('vehicles', [])
+            print(f"   Vehicles: {len(vehicles)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test drivers endpoint
+    print("\n4. Drivers:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/reference/drivers'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            drivers = data.get('drivers', [])
+            print(f"   Drivers: {len(drivers)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test routes endpoint
+    print("\n5. Routes:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/reference/routes'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            routes = data.get('routes', [])
+            print(f"   Routes: {len(routes)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test products search endpoint
+    print("\n6. Products search:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/reference/products?limit=5'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            products = data.get('products', [])
+            print(f"   Products returned: {len(products)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+
+def test_hybrid_query_api():
+    """Test hybrid query endpoints (Phase 4)."""
+    print("\n--- Testing Hybrid Query API (Kafka Streams + PostgreSQL) ---")
+
+    # Test customer overview (need a valid customer ID)
+    print("\n1. Customer overview (CUST-0001):")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/hybrid/customers/CUST-0001/overview'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            result_data = data.get('result', {})
+            sources = data.get('sources', [])
+            query_time = data.get('query_time_ms', 0)
+            summary = data.get('summary', '')
+            print(f"   Sources: {sources}")
+            print(f"   Query time: {query_time}ms")
+            if result_data:
+                print(f"   Company: {result_data.get('company_name', 'N/A')}")
+                print(f"   Total orders: {result_data.get('total_orders', 0)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test warehouse status
+    print("\n2. Warehouse status (WH-RTM):")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/hybrid/warehouses/WH-RTM/status'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            result_data = data.get('result', {})
+            sources = data.get('sources', [])
+            print(f"   Sources: {sources}")
+            if result_data:
+                print(f"   Warehouse: {result_data.get('name', 'N/A')} ({result_data.get('city', 'N/A')})")
+                print(f"   Vehicles: {result_data.get('total_vehicles', 0)}, Drivers: {result_data.get('total_drivers', 0)}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test enriched vehicle state
+    print("\n3. Enriched vehicle state (VEH-001):")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/hybrid/vehicles/VEH-001/enriched'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            sources = data.get('sources', [])
+            summary = data.get('summary', '')
+            print(f"   Sources: {sources}")
+            print(f"   Summary: {summary}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test driver tracking
+    print("\n4. Driver tracking (DRV-001):")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/hybrid/drivers/DRV-001/tracking'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            sources = data.get('sources', [])
+            summary = data.get('summary', '')
+            print(f"   Sources: {sources}")
+            print(f"   Summary: {summary}")
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
@@ -303,8 +564,8 @@ def validate_statefulset():
 
 def main():
     print("=" * 60)
-    print("SmartShip Logistics - Phase 3 Validation")
-    print("Testing all 6 state stores")
+    print("SmartShip Logistics - Phase 4 Validation")
+    print("Testing all 9 state stores + PostgreSQL + Hybrid Queries")
     print("=" * 60)
 
     print("\n=== Validating Infrastructure ===")
@@ -330,24 +591,38 @@ def main():
     # Validate StatefulSet configuration
     validate_statefulset()
 
-    print("\n=== Testing all 6 state stores via Interactive Queries ===")
+    print("\n=== Testing all 9 state stores via Interactive Queries ===")
     port_forward_and_test('streams-processor', 7070, test_all_state_stores)
 
     print("\n=== Testing metadata endpoints (multi-instance support) ===")
     port_forward_and_test('streams-processor', 7070, test_metadata_endpoints)
 
-    print("\n=== Testing Query API endpoints ===")
+    print("\n=== Testing Query API endpoints (Kafka Streams) ===")
     port_forward_and_test('query-api', 8080, test_query_api)
 
+    print("\n=== Testing Reference Data API (PostgreSQL) ===")
+    port_forward_and_test('query-api', 8080, test_reference_data_api)
+
+    print("\n=== Testing Hybrid Query API (Kafka Streams + PostgreSQL) ===")
+    port_forward_and_test('query-api', 8080, test_hybrid_query_api)
+
     print("\n" + "=" * 60)
-    print("Phase 3 Validation Complete!")
-    print("All 6 state stores verified:")
+    print("Phase 4 Validation Complete!")
+    print("=" * 60)
+    print("\nAll 9 state stores verified:")
     print("  1. active-shipments-by-status")
     print("  2. vehicle-current-state")
     print("  3. shipments-by-customer")
     print("  4. late-shipments")
     print("  5. warehouse-realtime-metrics (windowed)")
     print("  6. hourly-delivery-performance (windowed)")
+    print("  7. order-current-state (Phase 4)")
+    print("  8. orders-by-customer (Phase 4)")
+    print("  9. order-sla-tracking (Phase 4)")
+    print("\nPhase 4 additions:")
+    print("  - 17 PostgreSQL reference data endpoints")
+    print("  - 6 Order state query endpoints")
+    print("  - 7 Hybrid query endpoints (Kafka + PostgreSQL)")
     print("=" * 60)
 
     return 0
