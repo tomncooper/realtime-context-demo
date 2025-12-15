@@ -27,7 +27,8 @@
         <quarkus.version>3.30.1</quarkus.version>
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.12</logback.version>
-        
+        <jackson.version>2.18.2</jackson.version>
+
         <!-- Maven Plugins -->
         <jib.version>3.5.1</jib.version>
         <maven.compiler.plugin.version>3.14.1</maven.compiler.plugin.version>
@@ -82,6 +83,13 @@
                 <groupId>io.apicurio</groupId>
                 <artifactId>apicurio-registry-avro-serde-kafka</artifactId>
                 <version>${apicurio.version}</version>
+            </dependency>
+
+            <!-- Jackson -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
             </dependency>
 
             <!-- Logging -->

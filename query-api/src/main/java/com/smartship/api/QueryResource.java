@@ -9,15 +9,15 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * REST API for querying shipment data.
- * Phase 1: Query shipments by status from Kafka Streams state store.
+ * REST API for querying logistics data from Kafka Streams state stores.
+ * Phase 3: Supports all 6 state stores.
  */
-@Path("/api/shipments")
+@Path("/api")
 @Produces(MediaType.APPLICATION_JSON)
-@Tag(name = "Shipments", description = "Query shipment data")
 public class QueryResource {
 
     private static final Logger LOG = Logger.getLogger(QueryResource.class);
@@ -25,9 +25,15 @@ public class QueryResource {
     @Inject
     KafkaStreamsQueryService streamsQuery;
 
+    // ===========================================
+    // Shipment Status Endpoints
+    // ===========================================
+
     @GET
-    @Path("/by-status/{status}")
-    @Operation(summary = "Get shipment count by status", description = "Returns the count of shipments for a specific status (CREATED, IN_TRANSIT, DELIVERED)")
+    @Path("/shipments/by-status/{status}")
+    @Tag(name = "Shipments", description = "Query shipment data")
+    @Operation(summary = "Get shipment count by status",
+               description = "Returns the count of shipments for a specific status")
     public Response getShipmentsByStatus(@PathParam("status") String status) {
         LOG.infof("Querying shipments with status: %s", status);
 
@@ -52,8 +58,10 @@ public class QueryResource {
     }
 
     @GET
-    @Path("/status/all")
-    @Operation(summary = "Get all status counts", description = "Returns counts for all shipment statuses")
+    @Path("/shipments/status/all")
+    @Tag(name = "Shipments")
+    @Operation(summary = "Get all status counts",
+               description = "Returns counts for all shipment statuses")
     public Response getAllStatusCounts() {
         LOG.info("Querying all status counts");
 
@@ -74,13 +82,348 @@ public class QueryResource {
         }
     }
 
+    // ===========================================
+    // Vehicle State Endpoints
+    // ===========================================
+
+    @GET
+    @Path("/vehicles/state")
+    @Tag(name = "Vehicles", description = "Query vehicle telemetry data")
+    @Operation(summary = "Get all vehicle states",
+               description = "Returns current state for all vehicles from telemetry")
+    public Response getAllVehicleStates() {
+        LOG.info("Querying all vehicle states");
+
+        try {
+            List<Map<String, Object>> vehicles = streamsQuery.getAllVehicleStates();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("vehicles", vehicles);
+            response.put("count", vehicles.size());
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all vehicle states", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/vehicles/state/{vehicleId}")
+    @Tag(name = "Vehicles")
+    @Operation(summary = "Get vehicle state",
+               description = "Returns current state for a specific vehicle")
+    public Response getVehicleState(@PathParam("vehicleId") String vehicleId) {
+        LOG.infof("Querying vehicle state for: %s", vehicleId);
+
+        try {
+            Map<String, Object> state = streamsQuery.getVehicleState(vehicleId);
+
+            if (state == null || state.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Vehicle not found: " + vehicleId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("vehicle", state);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying vehicle state for: %s", vehicleId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Customer Shipment Stats Endpoints
+    // ===========================================
+
+    @GET
+    @Path("/customers/shipments/all")
+    @Tag(name = "Customers", description = "Query customer shipment data")
+    @Operation(summary = "Get all customer shipment stats",
+               description = "Returns shipment statistics for all customers")
+    public Response getAllCustomerStats() {
+        LOG.info("Querying all customer shipment stats");
+
+        try {
+            List<Map<String, Object>> customers = streamsQuery.getAllCustomerStats();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("customers", customers);
+            response.put("count", customers.size());
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all customer stats", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/customers/{customerId}/shipments")
+    @Tag(name = "Customers")
+    @Operation(summary = "Get customer shipment stats",
+               description = "Returns shipment statistics for a specific customer")
+    public Response getCustomerShipmentStats(@PathParam("customerId") String customerId) {
+        LOG.infof("Querying shipment stats for customer: %s", customerId);
+
+        try {
+            Map<String, Object> stats = streamsQuery.getCustomerShipmentStats(customerId);
+
+            if (stats == null || stats.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Customer not found: " + customerId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("customer_stats", stats);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying customer stats for: %s", customerId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Late Shipments Endpoints
+    // ===========================================
+
+    @GET
+    @Path("/shipments/late")
+    @Tag(name = "Shipments")
+    @Operation(summary = "Get all late shipments",
+               description = "Returns all shipments that are past their expected delivery (30-min grace)")
+    public Response getAllLateShipments() {
+        LOG.info("Querying all late shipments");
+
+        try {
+            List<Map<String, Object>> lateShipments = streamsQuery.getAllLateShipments();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("late_shipments", lateShipments);
+            response.put("count", lateShipments.size());
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all late shipments", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/shipments/late/{shipmentId}")
+    @Tag(name = "Shipments")
+    @Operation(summary = "Get late shipment details",
+               description = "Returns details for a specific late shipment")
+    public Response getLateShipment(@PathParam("shipmentId") String shipmentId) {
+        LOG.infof("Querying late shipment: %s", shipmentId);
+
+        try {
+            Map<String, Object> details = streamsQuery.getLateShipment(shipmentId);
+
+            if (details == null || details.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Late shipment not found: " + shipmentId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("shipment", details);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying late shipment: %s", shipmentId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Warehouse Metrics Endpoints
+    // ===========================================
+
+    @GET
+    @Path("/warehouses/metrics/all")
+    @Tag(name = "Warehouses", description = "Query warehouse operations data")
+    @Operation(summary = "Get all warehouse metrics",
+               description = "Returns real-time metrics for all warehouses (15-min window)")
+    public Response getAllWarehouseMetrics() {
+        LOG.info("Querying all warehouse metrics");
+
+        try {
+            Map<String, Object> metrics = streamsQuery.getAllWarehouseMetrics();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("warehouses", metrics);
+            response.put("window_size_minutes", 15);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all warehouse metrics", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/warehouses/{warehouseId}/metrics")
+    @Tag(name = "Warehouses")
+    @Operation(summary = "Get warehouse metrics",
+               description = "Returns real-time metrics for a specific warehouse")
+    public Response getWarehouseMetrics(@PathParam("warehouseId") String warehouseId) {
+        LOG.infof("Querying warehouse metrics for: %s", warehouseId);
+
+        try {
+            List<Map<String, Object>> metrics = streamsQuery.getWarehouseMetrics(warehouseId);
+
+            if (metrics.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "No metrics found for warehouse: " + warehouseId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("warehouse_id", warehouseId);
+            response.put("windows", metrics);
+            response.put("window_size_minutes", 15);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying warehouse metrics for: %s", warehouseId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Delivery Performance Endpoints
+    // ===========================================
+
+    @GET
+    @Path("/performance/hourly")
+    @Tag(name = "Performance", description = "Query delivery performance data")
+    @Operation(summary = "Get all hourly performance",
+               description = "Returns hourly delivery performance for all warehouses")
+    public Response getAllHourlyPerformance() {
+        LOG.info("Querying all hourly performance");
+
+        try {
+            Map<String, Object> performance = streamsQuery.getAllHourlyPerformance();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("warehouses", performance);
+            response.put("window_size_minutes", 60);
+            response.put("window_advance_minutes", 30);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error querying all hourly performance", e);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    @GET
+    @Path("/performance/hourly/{warehouseId}")
+    @Tag(name = "Performance")
+    @Operation(summary = "Get warehouse hourly performance",
+               description = "Returns hourly delivery performance for a specific warehouse")
+    public Response getHourlyPerformance(@PathParam("warehouseId") String warehouseId) {
+        LOG.infof("Querying hourly performance for: %s", warehouseId);
+
+        try {
+            List<Map<String, Object>> performance = streamsQuery.getHourlyPerformance(warehouseId);
+
+            if (performance.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "No performance data found for warehouse: " + warehouseId))
+                    .build();
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("warehouse_id", warehouseId);
+            response.put("windows", performance);
+            response.put("window_size_minutes", 60);
+            response.put("window_advance_minutes", 30);
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("source", "kafka-streams");
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error querying hourly performance for: %s", warehouseId);
+            return Response.serverError()
+                .entity(Map.of("error", e.getMessage()))
+                .build();
+        }
+    }
+
+    // ===========================================
+    // Health Check
+    // ===========================================
+
     @GET
     @Path("/health")
+    @Tag(name = "Health")
     @Operation(summary = "Health check", description = "Check if the query API is healthy")
     public Response health() {
         return Response.ok(Map.of(
             "status", "UP",
             "service", "smartship-query-api",
+            "phase", "3",
+            "state_stores", List.of(
+                "active-shipments-by-status",
+                "vehicle-current-state",
+                "shipments-by-customer",
+                "late-shipments",
+                "warehouse-realtime-metrics",
+                "hourly-delivery-performance"
+            ),
             "timestamp", System.currentTimeMillis()
         )).build();
     }

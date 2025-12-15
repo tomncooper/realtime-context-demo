@@ -11,19 +11,6 @@ from common import (
 )
 
 
-def delete_old_deployment_if_exists(name: str) -> None:
-    """Delete old Deployment if it exists (for migration to StatefulSet)."""
-    print(f"Checking for existing Deployment {name}...")
-    result = run_command([
-        'kubectl', 'get', 'deployment', name, '-n', NAMESPACE
-    ], check=False, capture_output=True)
-
-    if result.returncode == 0:
-        print(f"Found existing Deployment {name}, deleting it...")
-        kubectl('delete', 'deployment', name, '-n', NAMESPACE, '--ignore-not-found=true')
-        print(f"✓ Deleted old Deployment {name}")
-
-
 def main():
     print("=" * 60)
     print("SmartShip Logistics - Deploy Applications")
@@ -38,10 +25,6 @@ def main():
     verify_kafka_data_flow('vehicle.telemetry', max_messages=5, timeout=60)
     verify_kafka_data_flow('warehouse.operations', max_messages=5, timeout=60)
     verify_kafka_data_flow('order.status', max_messages=5, timeout=60)
-
-    print("\n=== Deploying Streams Processor (StatefulSet) ===")
-    # Delete old Deployment if migrating to StatefulSet
-    delete_old_deployment_if_exists('streams-processor')
 
     # Apply the StatefulSet and services
     kubectl('apply', '-f', 'kubernetes/applications/streams-processor.yaml')

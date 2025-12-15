@@ -40,6 +40,12 @@
             <artifactId>apicurio-registry-avro-serde-kafka</artifactId>
         </dependency>
 
+        <!-- Jackson for JSON serialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- Logging -->
         <dependency>
             <groupId>org.slf4j</groupId>
