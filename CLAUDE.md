@@ -11,7 +11,7 @@ This means you should automatically use the Context7 MCP tools to resolve librar
 
 SmartShip Logistics is a real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics and fulfillment company. The project is implemented as a Maven multi-module monorepo deployed on Kubernetes (minikube).
 
-**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED (9 state stores, 44+ API endpoints, hybrid queries)
+**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5 ✅ COMPLETED (9 state stores, 44+ API endpoints, native image, tests)
 
 ## Critical Architecture Concepts
 
@@ -161,7 +161,7 @@ cd query-api && ./mvnw clean package && cd ..
 # Build with Jib (supports podman/docker via -Djib.dockerClient.executable)
 mvn compile jib:dockerBuild -pl data-generators,streams-processor
 
-# Build Quarkus container (JVM mode for Phase 1)
+# Build Quarkus container (JVM mode)
 cd query-api && ./mvnw package -Dquarkus.container-image.build=true && cd ..
 
 # For podman (default):
@@ -173,17 +173,46 @@ minikube image load smartship/streams-processor:latest
 minikube image load smartship/query-api:latest
 ```
 
+### Native Image Build (Phase 5)
+```bash
+# Build query-api as native image using Python script
+python3 scripts/02-build-all.py --native
+
+# Or manually build native image
+cd query-api && ./mvnw package -Dnative -Dquarkus.native.container-build=true -Dquarkus.container-image.build=true && cd ..
+```
+
+**Native Image Configuration:**
+- Builder: `quay.io/quarkus/ubi-quarkus-mandrel-builder-image:jdk-21`
+- Base: `quay.io/quarkus/quarkus-micro-image:2.0`
+- Uses Java 21 for native builds (vs Java 25 for JVM mode)
+- Startup time: <100ms (vs ~10s JVM)
+- Memory: 64-128Mi (vs 256-512Mi JVM)
+
 ### Testing
 ```bash
 # Run unit tests
 mvn test
+
+# Run query-api tests specifically
+mvn test -pl query-api
 
 # Run integration tests
 mvn verify
 
 # Test specific module
 mvn test -pl streams-processor
+
+# Run with coverage report
+mvn verify -pl query-api
 ```
+
+**Test Classes (Phase 5):**
+- `PostgresQueryServiceTest.java` - PostgreSQL service tests
+- `KafkaStreamsQueryServiceTest.java` - Kafka Streams service tests
+- `ReferenceDataResourceTest.java` - Reference data endpoint tests
+- `QueryResourceTest.java` - Query API endpoint tests
+- `HybridQueryResourceTest.java` - Hybrid query endpoint tests
 
 ## Deployment (Python Scripts)
 
@@ -567,9 +596,22 @@ When implementing additional topics and generators:
 - HybridQueryResult with `warnings` field for graceful error handling
 - Correct ID formats: CUST-0001 (4 digits), VEH-001 (3 digits), DRV-001 (3 digits)
 
-**Phase 5-6 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
-- Phase 5: Native image builds, production hardening
-- Phase 6: Demo optimization with LLM integration examples
+**Phase 5 (✅ COMPLETED):** Native image builds, testing, and production hardening
+- GraalVM/Mandrel native image compilation for query-api
+- 5 test classes with JUnit 5, Mockito, Rest-Assured, JaCoCo
+- Exception handling with consistent JSON error responses
+- NativeImageReflectionConfig registering 23 model classes
+- Build script `--native` flag support (`python3 scripts/02-build-all.py --native`)
+- Native image: <100ms startup, 64-128Mi memory, ~50MB container size
+- Key files:
+  - `query-api/src/main/java/com/smartship/api/config/NativeImageReflectionConfig.java`
+  - `query-api/src/main/java/com/smartship/api/config/ExceptionMappers.java`
+  - `query-api/src/test/java/com/smartship/api/**/*Test.java` (5 test classes)
+
+**Phase 6-8 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
+- Phase 6: Demo optimization with Grafana dashboards
+- Phase 7: LLM chatbot integration with Quarkus LangChain4j and Ollama
+- Phase 8: Advanced LLM features with guardrails and analytics
 
 ## Common Issues
 

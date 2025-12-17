@@ -37,23 +37,44 @@ spec:
             - name: POSTGRES_DB
               value: "smartship"
           resources:
+            # JVM mode: 512Mi-1Gi
+            # Native mode: 64Mi-128Mi (uncomment below and comment above)
             requests:
               memory: "512Mi"
               cpu: "250m"
             limits:
               memory: "1Gi"
               cpu: "500m"
+            # Native image resources (faster startup, lower memory):
+            # requests:
+            #   memory: "64Mi"
+            #   cpu: "100m"
+            # limits:
+            #   memory: "128Mi"
+            #   cpu: "250m"
+          startupProbe:
+            httpGet:
+              path: /q/health/started
+              port: 8080
+            # JVM mode: needs more time to start
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            failureThreshold: 30
+            # Native mode (uncomment for faster probing):
+            # initialDelaySeconds: 0
+            # periodSeconds: 1
+            # failureThreshold: 10
           livenessProbe:
             httpGet:
               path: /q/health/live
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /q/health/ready
               port: 8080
-            initialDelaySeconds: 10
+            initialDelaySeconds: 0
             periodSeconds: 5
 ---
 apiVersion: v1
