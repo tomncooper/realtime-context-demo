@@ -48,8 +48,9 @@ public class GeneratorMain {
         WarehouseOperationGenerator warehouseGenerator = new WarehouseOperationGenerator();
         warehouseGenerator.start();
 
-        LOG.info("\n=== Starting Order Status Generator ===");
-        OrderStatusGenerator orderGenerator = new OrderStatusGenerator();
+        // OrderStatusGenerator requires ShipmentEventGenerator for coordination
+        LOG.info("\n=== Starting Order Status Generator (with shipment coordination) ===");
+        OrderStatusGenerator orderGenerator = new OrderStatusGenerator(shipmentGenerator);
         orderGenerator.start();
 
         LOG.info("\n" + "=".repeat(60));
@@ -59,6 +60,10 @@ public class GeneratorMain {
         LOG.info("  - vehicle.telemetry (20-30 events/sec)");
         LOG.info("  - warehouse.operations (15-25 events/sec)");
         LOG.info("  - order.status (10-15 events/sec)");
+        LOG.info("Order-Shipment Coordination:");
+        LOG.info("  - Orders wait for all shipments to reach DISPATCHED before SHIPPED");
+        LOG.info("  - Orders wait for all shipments to reach DELIVERED before DELIVERED");
+        LOG.info("  - Shipment EXCEPTION triggers order PARTIAL_FAILURE");
         LOG.info("=".repeat(60));
 
         // Keep main thread alive

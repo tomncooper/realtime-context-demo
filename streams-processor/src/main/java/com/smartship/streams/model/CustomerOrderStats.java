@@ -70,12 +70,20 @@ public record CustomerOrderStats(
                 returned++;
                 if (delivered > 0) delivered--;
             }
+            case PARTIAL_FAILURE -> {
+                // Partial failure is terminal - order had shipment exception
+                cancelled++;  // Count as failed/cancelled for stats
+                if (pending > 0) pending--;
+                else if (shipped > 0) shipped--;
+                if (atRisk > 0) atRisk--;
+            }
         }
 
         // Check if order is at SLA risk
         if (!statusType.equals(OrderStatusType.DELIVERED) &&
             !statusType.equals(OrderStatusType.CANCELLED) &&
-            !statusType.equals(OrderStatusType.RETURNED)) {
+            !statusType.equals(OrderStatusType.RETURNED) &&
+            !statusType.equals(OrderStatusType.PARTIAL_FAILURE)) {
             long now = System.currentTimeMillis();
             long sla = event.getSlaTimestamp();
             long minutesToSla = (sla - now) / 60000;

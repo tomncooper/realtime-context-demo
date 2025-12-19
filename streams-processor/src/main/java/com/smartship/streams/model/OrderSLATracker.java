@@ -34,7 +34,8 @@ public record OrderSLATracker(
         OrderStatusType status = event.getStatus();
         boolean isTerminal = status == OrderStatusType.DELIVERED ||
                             status == OrderStatusType.CANCELLED ||
-                            status == OrderStatusType.RETURNED;
+                            status == OrderStatusType.RETURNED ||
+                            status == OrderStatusType.PARTIAL_FAILURE;
 
         boolean atRisk = !isTerminal && minutesToSla <= SLA_RISK_THRESHOLD_MINUTES && minutesToSla >= 0;
         boolean breached = !isTerminal && minutesToSla < 0;
@@ -62,7 +63,8 @@ public record OrderSLATracker(
         // Don't track terminal states
         if (status == OrderStatusType.DELIVERED ||
             status == OrderStatusType.CANCELLED ||
-            status == OrderStatusType.RETURNED) {
+            status == OrderStatusType.RETURNED ||
+            status == OrderStatusType.PARTIAL_FAILURE) {
             return false;
         }
 

@@ -29,8 +29,8 @@ public class ShipmentEventGenerator {
     private static final int NEW_SHIPMENTS_PER_SECOND = 10;
 
     // Exception and cancellation rates
-    private static final double EXCEPTION_RATE = 0.05;  // 5%
-    private static final double CANCELLATION_RATE = 0.02;  // 2%
+    private static final double EXCEPTION_RATE = 0.05;
+    private static final double CANCELLATION_RATE = 0.02;
 
     // SLA durations in milliseconds
     private static final long SLA_STANDARD = 5L * 24 * 60 * 60 * 1000;  // 5 days
@@ -119,6 +119,36 @@ public class ShipmentEventGenerator {
             shipmentId, customerId, destination.getCity());
     }
 
+    /**
+     * Create a shipment from an order.
+     * This method is called by OrderStatusGenerator to create actual shipments
+     * that are linked to orders for status coordination.
+     */
+    public void createShipmentFromOrder(String shipmentId, String orderId, String warehouseId,
+                                         String customerId, String destinationCity,
+                                         String destinationCountry, long expectedDelivery) {
+        // Register shipment-to-order mapping
+        correlationManager.registerShipmentForOrder(shipmentId, orderId);
+
+        // Register shipment state
+        correlationManager.registerShipment(shipmentId, warehouseId, customerId,
+            destinationCity, destinationCountry, expectedDelivery);
+
+        // Create simulation state and add to active lifecycles
+        ShipmentSimState simState = new ShipmentSimState(shipmentId, warehouseId, customerId,
+            destinationCity, destinationCountry, expectedDelivery);
+        activeLifecycles.put(shipmentId, simState);
+
+        // Send CREATED event
+        sendEvent(simState, ShipmentEventType.CREATED);
+
+        // Notify coordination manager
+        correlationManager.onShipmentStatusChanged(shipmentId, "CREATED");
+
+        LOG.debug("Created order-linked shipment: {} for order: {} customer: {} to {}",
+            shipmentId, orderId, customerId, destinationCity);
+    }
+
     private void progressLifecycles() {
         long now = System.currentTimeMillis();
 
@@ -130,6 +160,7 @@ public class ShipmentEventGenerator {
                     // Lifecycle complete
                     activeLifecycles.remove(simState.shipmentId);
                     correlationManager.removeShipment(simState.shipmentId);
+                    correlationManager.removeShipmentOrderMapping(simState.shipmentId);
                     continue;
                 }
 
@@ -137,13 +168,18 @@ public class ShipmentEventGenerator {
                 double rand = ThreadLocalRandom.current().nextDouble();
                 if (simState.currentState == ShipmentEventType.CREATED && rand < CANCELLATION_RATE) {
                     sendEvent(simState, ShipmentEventType.CANCELLED);
+                    correlationManager.updateShipmentStatus(simState.shipmentId, "CANCELLED");
+                    correlationManager.onShipmentStatusChanged(simState.shipmentId, "CANCELLED");
                     activeLifecycles.remove(simState.shipmentId);
                     correlationManager.removeShipment(simState.shipmentId);
+                    correlationManager.removeShipmentOrderMapping(simState.shipmentId);
                     continue;
                 }
 
                 if (simState.currentState == ShipmentEventType.IN_TRANSIT && rand < EXCEPTION_RATE) {
                     sendEvent(simState, ShipmentEventType.EXCEPTION);
+                    correlationManager.updateShipmentStatus(simState.shipmentId, "EXCEPTION");
+                    correlationManager.onShipmentStatusChanged(simState.shipmentId, "EXCEPTION");
                     // Exception doesn't end lifecycle, just delays it
                     simState.scheduleNextTransition(now, 5000); // 5 second delay after exception
                     continue;
@@ -153,8 +189,9 @@ public class ShipmentEventGenerator {
                 sendEvent(simState, nextState);
                 simState.advanceState(nextState, now);
 
-                // Update correlation manager
+                // Update correlation manager and notify for order coordination
                 correlationManager.updateShipmentStatus(simState.shipmentId, nextState.name());
+                correlationManager.onShipmentStatusChanged(simState.shipmentId, nextState.name());
             }
         }
     }

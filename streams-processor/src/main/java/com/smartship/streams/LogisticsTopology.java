@@ -178,7 +178,7 @@ public class LogisticsTopology {
 
         KTable<String, Long> shipmentCountsByStatus = shipmentStream
             .groupBy(
-                (key, value) -> value.getEventType().toString(),
+                (_, value) -> value.getEventType().toString(),
                 Grouped.with(Serdes.String(), shipmentEventSerde)
             )
             .count(

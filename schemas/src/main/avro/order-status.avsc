@@ -32,7 +32,8 @@
           "SHIPPED",
           "DELIVERED",
           "CANCELLED",
-          "RETURNED"
+          "RETURNED",
+          "PARTIAL_FAILURE"
         ]
       },
       "doc": "Current order status"

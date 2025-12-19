@@ -4,6 +4,8 @@ import com.smartship.generators.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.smartship.logistics.events.OrderStatusType;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -38,6 +40,27 @@ public class DataCorrelationManager {
     private final ConcurrentHashMap<String, ShipmentState> activeShipments;
     private final ConcurrentHashMap<String, OrderState> activeOrders;
     private final ConcurrentHashMap<String, VehicleRuntimeState> activeVehicles;
+
+    // Order-Shipment coordination
+    private final ConcurrentHashMap<String, String> shipmentToOrderId;  // shipment_id → order_id
+    private final ConcurrentHashMap<String, OrderStatusType> orderReadyStatus;  // order_id → ready-to-advance status
+
+    // Shipment status ordinals for comparison
+    private static final Map<String, Integer> SHIPMENT_STATUS_ORDINAL = Map.of(
+        "CREATED", 0,
+        "PICKED", 1,
+        "PACKED", 2,
+        "DISPATCHED", 3,
+        "IN_TRANSIT", 4,
+        "OUT_FOR_DELIVERY", 5,
+        "DELIVERED", 6
+    );
+
+    // Shipment milestones that trigger order status changes
+    private static final Map<String, OrderStatusType> SHIPMENT_TO_ORDER_THRESHOLD = Map.of(
+        "DISPATCHED", OrderStatusType.SHIPPED,
+        "DELIVERED", OrderStatusType.DELIVERED
+    );
 
     // Destination cities (derived from routes)
     private final List<DestinationInfo> destinations;
@@ -88,6 +111,10 @@ public class DataCorrelationManager {
         this.activeShipments = new ConcurrentHashMap<>();
         this.activeOrders = new ConcurrentHashMap<>();
         this.activeVehicles = new ConcurrentHashMap<>();
+
+        // Initialize order-shipment coordination
+        this.shipmentToOrderId = new ConcurrentHashMap<>();
+        this.orderReadyStatus = new ConcurrentHashMap<>();
 
         LOG.info("DataCorrelationManager initialized from PostgreSQL with {} warehouses, {} customers, {} vehicles, {} drivers, {} products, {} routes",
             warehouseIds.size(), customerIds.size(), vehicleIds.size(), driverIds.size(), productIds.size(), routeIds.size());
@@ -238,6 +265,109 @@ public class DataCorrelationManager {
 
     public int getActiveOrderCount() {
         return activeOrders.size();
+    }
+
+    // ========== Order-Shipment Coordination ==========
+
+    /**
+     * Register a shipment as belonging to a specific order.
+     * This enables coordination between shipment and order status.
+     */
+    public void registerShipmentForOrder(String shipmentId, String orderId) {
+        shipmentToOrderId.put(shipmentId, orderId);
+        LOG.debug("Registered shipment {} for order {}", shipmentId, orderId);
+    }
+
+    /**
+     * Get the order ID that a shipment belongs to.
+     */
+    public String getOrderIdForShipment(String shipmentId) {
+        return shipmentToOrderId.get(shipmentId);
+    }
+
+    /**
+     * Get the ready-to-advance status for an order.
+     * Returns null if the order is not ready to advance.
+     */
+    public OrderStatusType getOrderReadyStatus(String orderId) {
+        return orderReadyStatus.get(orderId);
+    }
+
+    /**
+     * Clear the ready status after the order has advanced.
+     */
+    public void clearOrderReadyStatus(String orderId) {
+        orderReadyStatus.remove(orderId);
+    }
+
+    /**
+     * Called when a shipment's status changes.
+     * Evaluates whether the order should advance based on all shipment statuses.
+     */
+    public void onShipmentStatusChanged(String shipmentId, String newStatus) {
+        String orderId = shipmentToOrderId.get(shipmentId);
+        if (orderId == null) {
+            return;  // Shipment not linked to an order
+        }
+
+        OrderState order = activeOrders.get(orderId);
+        if (order == null) {
+            return;
+        }
+
+        // EXCEPTION → immediately mark order as PARTIAL_FAILURE
+        if ("EXCEPTION".equals(newStatus)) {
+            orderReadyStatus.put(orderId, OrderStatusType.PARTIAL_FAILURE);
+            LOG.info("Order {} marked PARTIAL_FAILURE due to shipment {} exception", orderId, shipmentId);
+            return;
+        }
+
+        // CANCELLED → check if ALL shipments are cancelled
+        if ("CANCELLED".equals(newStatus)) {
+            boolean allCancelled = order.getShipmentIds().stream()
+                .map(activeShipments::get)
+                .filter(Objects::nonNull)
+                .allMatch(s -> "CANCELLED".equals(s.getCurrentStatus()));
+
+            if (allCancelled) {
+                orderReadyStatus.put(orderId, OrderStatusType.CANCELLED);
+                LOG.info("Order {} cancelled - all shipments cancelled", orderId);
+            }
+            return;
+        }
+
+        // Normal milestone check - all non-cancelled shipments must reach threshold
+        List<ShipmentState> activeShipmentsForOrder = order.getShipmentIds().stream()
+            .map(activeShipments::get)
+            .filter(Objects::nonNull)
+            .filter(s -> !"CANCELLED".equals(s.getCurrentStatus()))
+            .toList();
+
+        if (activeShipmentsForOrder.isEmpty()) {
+            return;  // All cancelled, handled above
+        }
+
+        boolean allAtStatus = activeShipmentsForOrder.stream()
+            .allMatch(s -> shipmentStatusOrdinal(s.getCurrentStatus()) >= shipmentStatusOrdinal(newStatus));
+
+        if (allAtStatus && SHIPMENT_TO_ORDER_THRESHOLD.containsKey(newStatus)) {
+            orderReadyStatus.put(orderId, SHIPMENT_TO_ORDER_THRESHOLD.get(newStatus));
+            LOG.debug("Order {} ready to advance to {}", orderId, SHIPMENT_TO_ORDER_THRESHOLD.get(newStatus));
+        }
+    }
+
+    /**
+     * Get the ordinal value for a shipment status for comparison.
+     */
+    private int shipmentStatusOrdinal(String status) {
+        return SHIPMENT_STATUS_ORDINAL.getOrDefault(status, -1);
+    }
+
+    /**
+     * Clean up shipment-to-order mapping when a shipment is removed.
+     */
+    public void removeShipmentOrderMapping(String shipmentId) {
+        shipmentToOrderId.remove(shipmentId);
     }
 
     // ========== Vehicle State Management ==========

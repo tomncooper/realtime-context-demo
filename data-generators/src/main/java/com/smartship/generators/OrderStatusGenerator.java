@@ -37,13 +37,15 @@ public class OrderStatusGenerator {
     private final ScheduledExecutorService scheduler;
     private final ConcurrentHashMap<String, OrderSimState> activeOrders;
     private final Random random = new Random();
+    private final ShipmentEventGenerator shipmentGenerator;
 
-    public OrderStatusGenerator() {
+    public OrderStatusGenerator(ShipmentEventGenerator shipmentGenerator) {
+        this.shipmentGenerator = shipmentGenerator;
         this.producer = new KafkaProducer<>(KafkaConfig.createProducerConfig("order-status-generator"));
         this.correlationManager = DataCorrelationManager.getInstance();
         this.scheduler = Executors.newScheduledThreadPool(5);
         this.activeOrders = new ConcurrentHashMap<>();
-        LOG.info("OrderStatusGenerator initialized");
+        LOG.info("OrderStatusGenerator initialized with ShipmentEventGenerator coordination");
     }
 
     public void start() {
@@ -86,16 +88,32 @@ public class OrderStatusGenerator {
         // Determine priority
         OrderPriority priority = selectPriority();
 
-        // Generate 1-3 shipments per order
-        int shipmentCount = 1 + random.nextInt(3);
-        List<String> shipmentIds = new ArrayList<>();
-        for (int i = 0; i < shipmentCount; i++) {
-            shipmentIds.add("SH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-        }
-
         // Calculate SLA timestamp
         long now = System.currentTimeMillis();
         long slaTimestamp = now + SLA_DURATIONS.get(priority);
+
+        // Get a random warehouse and destination for the shipments
+        String warehouseId = correlationManager.getRandomWarehouseId();
+        DataCorrelationManager.DestinationInfo destination = correlationManager.getRandomDestination();
+
+        // Generate 1-3 shipments per order - create ACTUAL shipments via ShipmentEventGenerator
+        int shipmentCount = 1 + random.nextInt(3);
+        List<String> shipmentIds = new ArrayList<>();
+        for (int i = 0; i < shipmentCount; i++) {
+            String shipmentId = "SH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            shipmentIds.add(shipmentId);
+
+            // Create actual shipment via the shipment generator
+            shipmentGenerator.createShipmentFromOrder(
+                shipmentId,
+                orderId,
+                warehouseId,
+                customerId,
+                destination.getCity(),
+                destination.getCountry(),
+                slaTimestamp
+            );
+        }
 
         // Calculate total items
         int totalItems = shipmentCount * (1 + random.nextInt(10));
@@ -110,7 +128,7 @@ public class OrderStatusGenerator {
         // Send RECEIVED status
         sendOrderStatus(simState);
 
-        LOG.debug("Created new order {} with {} shipments, priority: {}",
+        LOG.debug("Created new order {} with {} actual shipments, priority: {}",
             orderId, shipmentCount, priority);
     }
 
@@ -126,24 +144,47 @@ public class OrderStatusGenerator {
         String orderId = orderIds.get(random.nextInt(orderIds.size()));
         OrderSimState simState = activeOrders.get(orderId);
 
-        if (simState == null || !simState.advanceStatus()) {
-            // Order complete or cancelled, remove it
+        if (simState == null) {
             activeOrders.remove(orderId);
-            correlationManager.removeOrder(orderId);
             return;
         }
 
-        // Send updated status
-        sendOrderStatus(simState);
+        // Check if shipment coordination has signaled a ready status
+        OrderStatusType readyStatus = correlationManager.getOrderReadyStatus(orderId);
 
-        // Update correlation manager
-        correlationManager.updateOrderStatus(orderId, simState.currentStatus.name());
+        if (readyStatus != null) {
+            // Advance to the ready status signaled by shipment coordination
+            simState.currentStatus = readyStatus;
+            correlationManager.clearOrderReadyStatus(orderId);
+            sendOrderStatus(simState);
+            correlationManager.updateOrderStatus(orderId, simState.currentStatus.name());
 
-        // Remove if terminal state
-        if (simState.isTerminal()) {
-            activeOrders.remove(orderId);
-            correlationManager.removeOrder(orderId);
+            if (simState.isTerminal()) {
+                activeOrders.remove(orderId);
+                correlationManager.removeOrder(orderId);
+                LOG.info("Order {} reached terminal state: {}", orderId, readyStatus);
+            }
+            return;
         }
+
+        // Only advance RECEIVED → VALIDATED → ALLOCATED on timer (no shipment dependency)
+        // ALLOCATED → SHIPPED and SHIPPED → DELIVERED require shipment milestones
+        if (simState.currentStatus == OrderStatusType.RECEIVED ||
+            simState.currentStatus == OrderStatusType.VALIDATED) {
+
+            if (!simState.advanceStatus()) {
+                // Order was cancelled during early stages
+                activeOrders.remove(orderId);
+                correlationManager.removeOrder(orderId);
+                return;
+            }
+
+            // Send updated status
+            sendOrderStatus(simState);
+            correlationManager.updateOrderStatus(orderId, simState.currentStatus.name());
+        }
+        // Orders in ALLOCATED or SHIPPED state wait for shipment milestones
+        // They will be advanced when onShipmentStatusChanged signals readyStatus
     }
 
     private void sendOrderStatus(OrderSimState simState) {
@@ -205,8 +246,9 @@ public class OrderStatusGenerator {
         }
 
         boolean advanceStatus() {
-            // State transitions: RECEIVED -> VALIDATED -> ALLOCATED -> SHIPPED -> DELIVERED
-            // With 5% chance of CANCELLED, 2% chance of RETURNED after DELIVERED
+            // Only handle early-stage timer-based transitions:
+            // RECEIVED -> VALIDATED -> ALLOCATED
+            // ALLOCATED -> SHIPPED and SHIPPED -> DELIVERED are handled by shipment coordination
             double rand = ThreadLocalRandom.current().nextDouble();
 
             switch (currentStatus) {
@@ -226,17 +268,10 @@ public class OrderStatusGenerator {
                     }
                     return true;
 
+                // ALLOCATED, SHIPPED wait for shipment coordination - don't advance on timer
                 case ALLOCATED:
-                    if (rand < 0.01) {
-                        currentStatus = OrderStatusType.CANCELLED;
-                    } else {
-                        currentStatus = OrderStatusType.SHIPPED;
-                    }
-                    return true;
-
                 case SHIPPED:
-                    currentStatus = OrderStatusType.DELIVERED;
-                    return true;
+                    return true;  // Stay in current state, waiting for shipment milestones
 
                 case DELIVERED:
                     if (rand < 0.02) {
@@ -247,6 +282,7 @@ public class OrderStatusGenerator {
 
                 case CANCELLED:
                 case RETURNED:
+                case PARTIAL_FAILURE:
                     return false;  // Terminal states
 
                 default:
@@ -257,19 +293,10 @@ public class OrderStatusGenerator {
         boolean isTerminal() {
             return currentStatus == OrderStatusType.DELIVERED ||
                    currentStatus == OrderStatusType.CANCELLED ||
-                   currentStatus == OrderStatusType.RETURNED;
+                   currentStatus == OrderStatusType.RETURNED ||
+                   currentStatus == OrderStatusType.PARTIAL_FAILURE;
         }
     }
 
-    public static void main(String[] args) {
-        LOG.info("Starting OrderStatusGenerator");
-        OrderStatusGenerator generator = new OrderStatusGenerator();
-        generator.start();
-
-        try {
-            Thread.sleep(Long.MAX_VALUE);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
+    // Note: This generator must be started via GeneratorMain which provides the ShipmentEventGenerator dependency
 }
