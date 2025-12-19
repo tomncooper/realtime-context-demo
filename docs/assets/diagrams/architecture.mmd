@@ -1,0 +1,41 @@
+flowchart LR
+    subgraph customers["Customers"]
+        C1[200 Business<br/>Customers]
+        OMS[Order Management<br/>System]
+    end
+
+    subgraph warehouses["Warehouses"]
+        W1[5 European<br/>Warehouses]
+        WMS[Warehouse<br/>Management<br/>System]
+        SCAN[Barcode Scanners<br/>& IoT Sensors]
+    end
+
+    subgraph fleet["Fleet"]
+        V1[50 Vehicles]
+        GPS[GPS & Telemetry]
+        DRV[75 Drivers]
+    end
+
+    PG[(PostgreSQL<br/>Reference Data)]
+
+    subgraph kafka["Apache Kafka"]
+        T1[order.status]
+        T2[shipment.events]
+        T3[vehicle.telemetry]
+        T4[warehouse.ops]
+    end
+
+    C1 --> OMS
+    OMS --> T1
+
+    W1 --> SCAN
+    SCAN --> WMS
+    WMS --> T2
+    WMS --> T4
+
+    V1 --> GPS
+    DRV --> V1
+    GPS --> T3
+
+    PG <-.-> OMS
+    PG <-.-> WMS
