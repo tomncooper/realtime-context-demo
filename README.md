@@ -2,10 +2,7 @@
 
 A real-time event streaming demonstration for a regional logistics and fulfillment company, showcasing Kafka Streams, materialized views, and an LLM-queryable API.
 
-## Current Status: Phase 5 Complete
-
-**Status:** ✅ Phase 1 | ✅ Phase 2 | ✅ Phase 3 | ✅ Phase 4 | ✅ Phase 5 (Native image, tests, production-ready)
-**Goal:** Production-quality system with native image builds, comprehensive testing, and optimized performance
+For a detailed description of this project see the [walk-through](docs/index.md).
 
 ## 🏗️ Architecture
 
@@ -57,23 +54,6 @@ A real-time event streaming demonstration for a regional logistics and fulfillme
 └─────────────────┘   └─────────────────────────┘
 ```
 
-## 🚀 Technology Stack
-
-- **Java 25 LTS** - Programming language (eclipse-temurin:25-jdk-ubi10-minimal)
-- **Kafka 4.1.1** - Event streaming with KRaft (no ZooKeeper)
-- **Kafka Streams 4.1.1** - Real-time stream processing
-- **Avro 1.12.1** - Schema-based serialization
-- **Apicurio Registry 3.1.4** - Schema registry
-- **Quarkus 3.30.1** - REST API framework (JVM mode)
-- **PostgreSQL 15** - Reference data storage (postgres:15-alpine)
-- **Strimzi 0.49.0** - Kafka operator for Kubernetes
-- **SLF4J 2.0.17** - Logging abstraction
-- **Logback 1.5.12** - Logging implementation
-- **Jib Maven Plugin 3.5.1** - Container image builder
-- **Kustomize** - Kubernetes manifest management
-- **Python 3.9+** - Deployment automation
-- **Podman/Docker** - Container runtime
-
 ## 📋 Prerequisites
 
 ### Required Tools
@@ -102,7 +82,7 @@ This will:
 - Deploy Kafka cluster with KRaft (single node)
 - Deploy Apicurio Registry
 - Deploy PostgreSQL with warehouse data
-- Create Kafka topic: `shipment.events`
+- Create Kafka topics
 
 ### 2. Build All Modules
 ```bash
@@ -113,7 +93,7 @@ export CONTAINER_RUNTIME=podman  # or docker
 python3 scripts/02-build-all.py
 
 # OR build native image (slower build, faster runtime)
-python3 scripts/02-build-all.py --native
+python3 scripts/02-build-all.py --native --native-container-image
 ```
 
 This will:
@@ -150,30 +130,7 @@ This will:
 - Query state store
 - Test Query API endpoints
 
-### 5. Cleanup (when done)
-```bash
-python3 scripts/05-cleanup.py
-```
-
 ## 🔍 Testing the System
-
-### Check Pods
-```bash
-kubectl get pods -n smartship
-```
-
-Expected output:
-- `events-cluster-dual-role-0` - Kafka broker (KRaft mode)
-- `apicurio-registry-...` - Schema registry
-- `postgresql-0` - Database
-- `data-generators-...` - Event producers (4 generators)
-- `streams-processor-0` - Kafka Streams app with 6 state stores (StatefulSet)
-- `query-api-...` - REST API with 14 endpoints
-
-```bash
-# Check StatefulSet status
-kubectl get statefulset -n smartship
-```
 
 ### Monitor Event Generation
 ```bash
@@ -265,7 +222,7 @@ curl http://localhost:8080/api/health | jq
 open http://localhost:8080/swagger-ui
 ```
 
-### ID Formats (Important!)
+### ID Formats 
 - **Customers:** `CUST-0001` through `CUST-0200` (4 digits, zero-padded)
 - **Vehicles:** `VEH-001` through `VEH-050` (3 digits)
 - **Drivers:** `DRV-001` through `DRV-075` (3 digits)
@@ -286,211 +243,6 @@ kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
 kubectl port-forward svc/postgresql 5432:5432 -n smartship &
 psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 ```
-
-## 📊 What's Happening
-
-### Event Flow (Phase 3)
-1. **Data Generators** produce events to 4 Kafka topics
-   - Loads reference data from PostgreSQL at startup (single source of truth)
-   - **Shipment Events** (50-80/sec): Full 9-state lifecycle with 5% exception rate
-   - **Vehicle Telemetry** (20-30/sec): Position updates for 50 vehicles
-   - **Warehouse Operations** (15-25/sec): 7 operation types with 3% error rate
-   - **Order Status** (10-15/sec): 4 SLA tiers
-
-2. **Kafka Streams Processor** (StatefulSet) maintains 6 state stores
-   - **active-shipments-by-status**: Count of shipments per status
-   - **vehicle-current-state**: Latest telemetry per vehicle
-   - **shipments-by-customer**: Aggregated stats per customer
-   - **late-shipments**: Shipments past expected delivery (30-min grace)
-   - **warehouse-realtime-metrics**: 15-minute tumbling window
-   - **hourly-delivery-performance**: 1-hour hopping window (30-min advance)
-
-3. **Query API** provides 14 REST endpoints
-   - Shipments: status counts, late shipments
-   - Vehicles: current state, location
-   - Customers: shipment statistics
-   - Warehouses: real-time operation metrics
-   - Performance: hourly delivery stats
-   - Multi-instance query support with parallel aggregation
-
-## 🏗️ Project Structure
-
-```
-realtime-context-demo/
-├── pom.xml                          # Parent POM
-├── schemas/                         # Avro schemas
-│   └── src/main/avro/
-│       └── shipment-event.avsc
-├── common/                          # Shared utilities
-│   └── src/main/java/com/smartship/common/
-│       ├── KafkaConfig.java
-│       └── ApicurioConfig.java
-├── data-generators/                 # Event producers (loads from PostgreSQL)
-│   └── src/main/java/com/smartship/generators/
-│       ├── GeneratorMain.java               # Entry point
-│       ├── ReferenceDataLoader.java         # PostgreSQL loader with retry
-│       ├── DataCorrelationManager.java      # Central coordinator
-│       ├── ShipmentEventGenerator.java
-│       └── model/                           # Reference data models
-├── streams-processor/               # Kafka Streams (StatefulSet) - 6 state stores
-│   └── src/main/java/com/smartship/streams/
-│       ├── LogisticsTopology.java          # 6 state store definitions
-│       ├── StreamsApplication.java
-│       ├── InteractiveQueryServer.java     # 12 query endpoints
-│       ├── StreamsMetadataResponse.java
-│       ├── model/                          # State store value types
-│       │   ├── VehicleState.java
-│       │   ├── CustomerShipmentStats.java
-│       │   ├── LateShipmentDetails.java
-│       │   ├── DeliveryStats.java
-│       │   └── WarehouseMetrics.java
-│       └── serde/JsonSerde.java            # Custom JSON serialization
-├── query-api/                       # Quarkus REST API - 14 endpoints
-│   └── src/main/java/com/smartship/api/
-│       ├── QueryResource.java              # REST endpoints
-│       ├── KafkaStreamsQueryService.java   # Distributed query support
-│       ├── model/                          # Response DTOs
-│       └── services/StreamsInstanceDiscoveryService.java
-├── kubernetes/                      # K8s manifests
-│   ├── infrastructure/              # Core infrastructure (Kafka, PostgreSQL, etc.)
-│   │   └── init.sql                 # PostgreSQL schema (used by configMapGenerator)
-│   ├── applications/                # Application manifests
-│   │   ├── data-generators.yaml
-│   │   ├── streams-processor.yaml   # StatefulSet + Headless Service
-│   │   └── query-api.yaml
-│   └── overlays/minikube/
-└── scripts/                         # Python automation
-    ├── common.py
-    ├── 01-setup-infra.py
-    ├── 02-build-all.py
-    ├── 03-deploy-apps.py
-    ├── 04-validate.py
-    └── 05-cleanup.py
-```
-
-## 📝 Data Model
-
-### Kafka Topics (4 topics)
-| Topic | Events/sec | Key Fields |
-|-------|------------|------------|
-| `shipment.events` | 50-80 | shipment_id, customer_id, warehouse_id, event_type |
-| `vehicle.telemetry` | 20-30 | vehicle_id, location, status, current_load |
-| `warehouse.operations` | 15-25 | event_id, warehouse_id, operation_type |
-| `order.status` | 10-15 | order_id, customer_id, shipment_ids, priority |
-
-### State Stores (9 stores - Phase 4)
-| Store | Type | Key | Value |
-|-------|------|-----|-------|
-| `active-shipments-by-status` | KeyValue | ShipmentEventType | Count |
-| `vehicle-current-state` | KeyValue | vehicle_id | VehicleState |
-| `shipments-by-customer` | KeyValue | customer_id | CustomerShipmentStats |
-| `late-shipments` | KeyValue | shipment_id | LateShipmentDetails |
-| `warehouse-realtime-metrics` | Windowed (15m) | warehouse_id | WarehouseMetrics |
-| `hourly-delivery-performance` | Windowed (1h) | warehouse_id | DeliveryStats |
-| `order-current-state` | KeyValue | order_id | OrderState (Phase 4) |
-| `orders-by-customer` | KeyValue | customer_id | CustomerOrderStats (Phase 4) |
-| `order-sla-tracking` | KeyValue | order_id | SLATracking (Phase 4) |
-
-### PostgreSQL Reference Data (6 tables - Single Source of Truth)
-PostgreSQL is the authoritative source for all reference data. The data-generators module loads this data at startup.
-
-| Table | Records | Description |
-|-------|---------|-------------|
-| warehouses | 5 | Rotterdam, Frankfurt, Barcelona, Warsaw, Stockholm |
-| customers | 200 | Companies with SLA tiers |
-| vehicles | 50 | Vans, box trucks, semi-trailers |
-| products | 10,000 | SKUs across 5 categories |
-| drivers | 75 | With license types and assignments |
-| routes | 100 | Predefined routes with distance/time |
-
-**Schema Definition:** `kubernetes/infrastructure/init.sql`
-
-## 🐛 Troubleshooting
-
-### Pods not starting
-```bash
-# Check pod status
-kubectl describe pod <pod-name> -n smartship
-
-# Check logs
-kubectl logs <pod-name> -n smartship
-```
-
-### Kafka cluster not ready
-```bash
-# Check Kafka status
-kubectl get kafka events-cluster -n smartship -o yaml
-
-# Check Strimzi operator logs
-kubectl logs deployment/strimzi-cluster-operator -n smartship
-```
-
-### Images not found
-```bash
-# Verify images in minikube
-minikube image ls | grep smartship
-
-# Rebuild and reload
-python3 scripts/02-build-all.py
-```
-
-### Container runtime issues
-```bash
-# Verify runtime
-podman --version  # or docker --version
-
-# Set explicitly
-export CONTAINER_RUNTIME=podman  # or docker
-python3 scripts/02-build-all.py
-```
-
-### Query API pod restarting
-If the query-api pod keeps restarting with health check failures:
-```bash
-# Check pod status
-kubectl describe pod -l app=query-api -n smartship
-
-# Check for HTTP 404 errors on /q/health/live or /q/health/ready
-kubectl logs deployment/query-api -n smartship
-```
-
-**Solution:** Ensure `quarkus-smallrye-health` dependency is in `query-api/pom.xml` and the container image uses Java 25 base image. See CLAUDE.md for detailed fix.
-
-## 🔧 Development
-
-### Build Individual Modules
-```bash
-# Build schemas only
-mvn clean install -pl schemas
-
-# Build query-api only
-cd query-api && mvn clean package && cd ..
-
-# Build native image manually
-cd query-api && ./mvnw package -Dnative -Dquarkus.native.container-build=true && cd ..
-```
-
-### Run Tests (Phase 5)
-```bash
-# Run all tests
-mvn test
-
-# Run query-api tests specifically
-mvn test -pl query-api
-
-# Run with coverage report
-mvn verify -pl query-api
-```
-
-**Test Classes:**
-- `PostgresQueryServiceTest.java` - PostgreSQL service tests
-- `KafkaStreamsQueryServiceTest.java` - Kafka Streams service tests
-- `ReferenceDataResourceTest.java` - Reference data endpoint tests
-- `QueryResourceTest.java` - Query API endpoint tests
-- `HybridQueryResourceTest.java` - Hybrid query endpoint tests
-
-### Run Locally (without Kubernetes)
-Not recommended - requires manual Kafka, Apicurio, and PostgreSQL setup.
 
 ## 📚 Phase Summary
 
@@ -519,22 +271,3 @@ Not recommended - requires manual Kafka, Apicurio, and PostgreSQL setup.
 - **Phase 6:** Demo optimization with Grafana dashboards
 - **Phase 7:** LLM chatbot integration with Quarkus LangChain4j and Ollama
 - **Phase 8:** Advanced LLM features with guardrails and analytics
-
-## 🤝 Contributing
-
-This is a demonstration project. See `design/implementation-plan.md` for complete architecture and implementation details.
-
-## 📄 License
-
-[Your License Here]
-
-## 🙏 Acknowledgments
-
-- Strimzi Kafka Operator for Kubernetes-native Kafka
-- Apicurio Registry for schema management
-- Quarkus for cloud-native Java framework
-- Red Hat for event streaming expertise
-
----
-
-**Phase 5 Status:** ✅ Complete - Native image builds, comprehensive testing, production-ready with optimized performance
