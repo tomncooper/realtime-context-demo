@@ -1,6 +1,7 @@
 package com.smartship.streams;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartship.logistics.events.ShipmentEventType;
 import com.smartship.streams.model.*;
 import com.smartship.streams.serde.JsonSerde;
 import com.sun.net.httpserver.HttpExchange;
@@ -32,12 +33,6 @@ public class InteractiveQueryServer {
     private static final Logger LOG = LoggerFactory.getLogger(InteractiveQueryServer.class);
     private static final int PORT = 7070;
     private static final ObjectMapper MAPPER = JsonSerde.getObjectMapper();
-
-    // All known status values for shipments
-    private static final String[] ALL_SHIPMENT_STATUSES = {
-        "CREATED", "PICKED", "PACKED", "DISPATCHED", "IN_TRANSIT",
-        "OUT_FOR_DELIVERY", "DELIVERED", "EXCEPTION", "CANCELLED"
-    };
 
     private final KafkaStreams streams;
     private HttpServer server;
@@ -198,9 +193,9 @@ public class InteractiveQueryServer {
             } else {
                 // Query all statuses
                 Map<String, Long> counts = new LinkedHashMap<>();
-                for (String status : ALL_SHIPMENT_STATUSES) {
-                    Long count = store.get(status);
-                    counts.put(status, count != null ? count : 0L);
+                for (ShipmentEventType status : ShipmentEventType.values()) {
+                    Long count = store.get(status.name());
+                    counts.put(status.name(), count != null ? count : 0L);
                 }
                 sendJsonResponse(exchange, counts);
             }

@@ -6,7 +6,6 @@ import com.smartship.logistics.events.ShipmentEventType;
 import com.smartship.logistics.events.VehicleTelemetry;
 import com.smartship.logistics.events.WarehouseOperation;
 import com.smartship.logistics.events.OrderStatus;
-import com.smartship.logistics.events.OrderStatusType;
 import com.smartship.streams.model.*;
 import com.smartship.streams.serde.JsonSerde;
 import io.apicurio.registry.serde.avro.AvroSerde;
