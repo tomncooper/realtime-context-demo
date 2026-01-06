@@ -23,7 +23,7 @@ They deliver over 10,000 products to 200 customers.
 
 SmartShip has implemented an event driven architecture. 
 All the vehicles report their locations back to head office at least every minute, the warehouses are fully instrumented and each shipment's status is updated in real-time.
-Customers issue orders, which can contain multiple shipments, via the order management system.
+Customers issue orders, which contain one or more shipments, via the order management system.
 
 ![SmartShip Architecture](assets/imgs/architecture.png)
 
@@ -39,7 +39,7 @@ There are 4 key Kafka topics in the system:
     - `RETURNED`
     - `PARTIAL_FAILURE`
     - The state of an order only changes once all the shipments within it have moved to the new state.
-- shipment.events: This is similar to the order status topic but for individual shipments (packages). Messages on this topic include the customer and shipment IDs, source and destination information and the status of the shipment:
+- shipment.events: This is similar to the order status topic but for the individual shipments (packages) which make up an order. Messages on this topic include the customer and shipment IDs, source and destination information and the status of the shipment:
     - `CREATED`
     - `PICKED`
     - `PACKED`
@@ -49,7 +49,7 @@ There are 4 key Kafka topics in the system:
     - `DELIVERED`
     - `EXCEPTION`
     - `CANCELLED`
-- vehicle.telemetry: Each vehicle updates head office at least once a minuet. They provide location, speed and heading information as well as the current vehicle status:
+- vehicle.telemetry: Each vehicle updates head office at least once a minute. They provide location, speed and heading information as well as the current vehicle status:
     - `IDLE`
     - `EN_ROUTE`
     - `LOADING` 
@@ -69,17 +69,17 @@ Each topic has an associated Avro message schema (you can see these in the `sche
 ## Real-time State
 
 The data in these four topics represents the current state of the SmartShip business. 
-Downstream of these topics many different business functions can be attached. 
+Downstream of these topics, many different business processes can be attached. 
 For critical business operations the shipment and order events will be persisted in a relational database.
-However, the people in charge of SmartShip know that this data has more to offer than just facilitating the day-to-day operations.
+However, the people in charge of SmartShip know that this data has more to offer than just facilitating the day-to-day operation of the company.
 For example the vehicle telemetry could be loaded into a timeseries database for visualisation and routing analytics.
-The orders and shipment events could be loaded into Apache Iceberg tables for analysis of customer trends.
+The orders and shipment events could be loaded into Apache Iceberg tables to allow for analysis of customer purchasing trends.
 However, those analytical requirements mean running additional databases and datalake systems, their associated infrastructure and the tooling to extract and load the events into them.
 What if we would like to see the state of the streams with less infrastructure and crucially less latency?
 
 One option for this is using Kafka Streams and its [Interactive Queries](https://kafka.apache.org/41/streams/developer-guide/interactive-queries/) functionality.
 This allows users to write relatively simple Kafka Streams queries that materialize a stream of data as a table-like structure. 
-This table can then be exposed via a server and value of specific keys, or ranges or key, queried in real time.
+This table can then be exposed via a server and the value of specific keys, or ranges of keys, queried in real time.
 
 ### Kafka Streams Materialized Views
 
@@ -87,7 +87,7 @@ Kafka Streams provides a powerful abstraction called a KTable, which represents 
 Each record in the underlying stream represents an update to the table, and the KTable maintains the latest value for each key.
 When combined with state stores, KTables become queryable materialized views of your streaming data.
 
-For example, to answer the question "How many shipments are currently in each status?", SmartShip creates a KTable that counts shipments grouped by their status:
+For example, to answer the question "How many shipments are currently in each of the possible shipment states?", SmartShip can create a KTable that reads the `shipment.events` topic and counts shipments grouped by their ShipmentEventType:
 
 ```java
 KTable<String, Long> shipmentCountsByStatus = shipmentStream
@@ -110,20 +110,24 @@ This code:
 4. Materializes the result into a named state store
 
 The state store is automatically updated as new events arrive, providing a real-time count of shipments in each status that can be queried at any time.
-For more complex queries, aggregations can build custom objects. For instance, to track per-customer shipment statistics, an aggregate function can maintain a running total of shipments, deliveries, and exceptions for each customer.
+For more complex queries, aggregations can build custom objects. 
+For instance, to track per-customer shipment statistics, an aggregate function can maintain a running total of shipments, deliveries, and exceptions for each customer.
 
 ### Kafka Streams Interactive Queries
 
 Once data is materialized into state stores, Kafka Streams' Interactive Queries feature allows these stores to be queried directly without needing to export the data to an external database.
-This provides sub-millisecond query latency on the current state of your streams.
+This provides low query latency on the current state of your streams.
 
-However, Interactive Queries introduce a complication in distributed deployments.
+However, Interactive Queries introduce a complication when using a Kafka Streams deployment which has been scaled out (multiple running instances of the Kafka Streams application). 
 Kafka Streams partitions data across multiple application instances, which means any given key's state might reside on a different instance than the one receiving the query.
 If you have three streams-processor instances, querying for `VEH-001`'s current state requires knowing which instance holds that vehicle's partition.
 
-SmartShip solves this challenge with a two-layer architecture:
+In this example project we have solved this challenge with a two-layer architecture:
 
-1. **Streams Processor (Interactive Query Server)**: Each instance exposes its local state stores via HTTP endpoints on port 7070. It also provides metadata endpoints that reveal which instances host which keys:
+![Interactive Queries Architecture](assets/imgs/interactive-queries.png)
+
+1. **Streams Processor (Interactive Query Server)**: Each instance of the streams-processor application exposes its local state stores via HTTP endpoints on port 7070. 
+   They also each provide a metadata endpoint that reveals which instances host which keys:
 
    - `/metadata/instances/{storeName}` - Lists all instances hosting a store
    - `/metadata/instance-for-key/{storeName}/{key}` - Finds the specific instance for a key

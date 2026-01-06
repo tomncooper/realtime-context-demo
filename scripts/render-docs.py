@@ -138,6 +138,10 @@ def main() -> int:
         diagrams_dir / "architecture.mmd",
         imgs_dir / "architecture.png"
     )
+    render_mermaid(
+        diagrams_dir / "interactive-queries.mmd",
+        imgs_dir / "interactive-queries.png"
+    )
 
     # Generate PDF
     print("Generating PDF with pandoc...")

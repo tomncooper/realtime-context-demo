@@ -1,0 +1,21 @@
+flowchart LR
+    QA[Query API]
+
+    subgraph SP0[streams-processor-0]
+        SS0[(State Store)]
+        K0[VEH-001...VEH-016]
+    end
+
+    subgraph SP1[streams-processor-1]
+        SS1[(State Store)]
+        K1[VEH-017...VEH-033]
+    end
+
+    subgraph SP2[streams-processor-2]
+        SS2[(State Store)]
+        K2[VEH-034...VEH-050]
+    end
+
+    QA --> SP0
+    QA --> SP1
+    QA --> SP2
