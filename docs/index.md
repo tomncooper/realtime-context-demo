@@ -5,16 +5,15 @@
 Systems like [Apache Kafka](https://kafka.apache.org/) allow organisations to develop event driven architectures, which allow businesses to react to changes in real time. 
 While these systems provide a flexible way to implement new business processes on top of low latency data streams, it can often be difficult to analyse the state of those streams and get a clear picture of the data as it exists _now_.
 Typically, companies will load the streams from Kafka topics into an analytical database, like Google Big Table or a datalake based on Open Table Formats like Apache Iceberg, and query the data from there.
-Alternatively, if it is a common query, they might create specific extract-transform-load jobs using Kafka client libraries in bespoke microservices or create a dedicated stream processing job using systems like Apache Flink.
+Alternatively, if it is a common query, they might create specific extract-transform-load (ETL) jobs using Kafka client libraries in bespoke microservices or create a dedicated stream processing job using systems like Apache Flink.
 This process can be quite involved and requires time to implement and tune. 
 A simpler alternative can be to create materialized versions of key data streams using Kafka Streams tables and exposing their state stores.
 This allows the current state of the streams to be queried by various tools, including AI agents.
 
-Agents (be they based on large language models or humans writing queries) work best with the most up to date context. 
-Using the latest materialized state of data streams composed from key business events, provides a way to get the most relevant up-to-date data to agents so they can answer queries as accurately as possible.
+Agents (be they based on large language models or humans writing queries) work best with the most up-to-date context. 
+Using the latest materialized state of data streams composed of key business events, provides a way to get the most relevant up-to-date data to agents so they can answer queries as accurately as possible.
 
 This walk-through describes an example business use case for materialized streams and how these can be configured to be accessible by an AI agent to answer queries about the current state of the business.
-
 
 ## SmartShip
 
@@ -26,7 +25,7 @@ SmartShip has implemented an event driven architecture.
 All the vehicles report their locations back to head office at least every minute, the warehouses are fully instrumented and each shipment's status is updated in real-time.
 Customers issue orders, which can contain multiple shipments, via the order management system.
 
-![SmartShip Architecture](assets/imgs/architecture.svg)
+![SmartShip Architecture](assets/imgs/architecture.png)
 
 There are 4 key Kafka topics in the system:
 
