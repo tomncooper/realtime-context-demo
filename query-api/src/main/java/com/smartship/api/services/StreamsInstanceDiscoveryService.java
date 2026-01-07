@@ -9,6 +9,7 @@ import jakarta.json.JsonValue;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.UriBuilder;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -171,7 +172,12 @@ public class StreamsInstanceDiscoveryService {
             LOG.debugf("DNS resolved %d addresses for %s", addresses.length, headlessService);
 
             for (InetAddress address : addresses) {
-                String instanceUrl = "http://" + address.getHostAddress() + ":" + port;
+                String instanceUrl = UriBuilder.newInstance()
+                    .scheme("http")
+                    .host(address.getHostAddress())
+                    .port(port)
+                    .build()
+                    .toString();
 
                 if (isInstanceHealthy(instanceUrl)) {
                     healthyInstances.add(instanceUrl);
@@ -184,7 +190,12 @@ public class StreamsInstanceDiscoveryService {
             LOG.warnf("DNS resolution failed for %s, falling back to pod-0", headlessService);
 
             // Fallback: try streams-processor-0 directly
-            String fallbackInstance = "http://streams-processor-0." + headlessService + ":" + port;
+            String fallbackInstance = UriBuilder.newInstance()
+                .scheme("http")
+                .host("streams-processor-0." + headlessService)
+                .port(port)
+                .build()
+                .toString();
             if (isInstanceHealthy(fallbackInstance)) {
                 healthyInstances.add(fallbackInstance);
             }
@@ -201,7 +212,10 @@ public class StreamsInstanceDiscoveryService {
      */
     private boolean isInstanceHealthy(String instanceUrl) {
         try {
-            String healthUrl = instanceUrl + "/health";
+            String healthUrl = UriBuilder.fromUri(instanceUrl)
+                .path("health")
+                .build()
+                .toString();
             JsonObject health = client.target(healthUrl)
                 .request(MediaType.APPLICATION_JSON)
                 .get(JsonObject.class);

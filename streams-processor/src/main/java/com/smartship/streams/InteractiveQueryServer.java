@@ -104,11 +104,7 @@ public class InteractiveQueryServer {
             }
 
             String storeName = parts[3];
-            Collection<StreamsMetadata> metadata = streams.metadataForAllStreamsClients();
-
-            Collection<StreamsMetadata> storeMetadata = metadata.stream()
-                .filter(m -> m.stateStoreNames().contains(storeName))
-                .toList();
+            Collection<StreamsMetadata> storeMetadata = streams.streamsMetadataForStore(storeName);
 
             List<Map<String, Object>> result = new ArrayList<>();
             for (StreamsMetadata meta : storeMetadata) {

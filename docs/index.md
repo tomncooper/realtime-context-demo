@@ -1,5 +1,7 @@
 # Real-time Context Demo
 
+Source Code Repository: [https://github.com/tomncooper/realtime-context-demo](https://github.com/tomncooper/realtime-context-demo)
+
 ## Introduction
 
 Systems like [Apache Kafka](https://kafka.apache.org/) allow organisations to develop event driven architectures, which allow businesses to react to changes in real time. 
@@ -64,7 +66,7 @@ There are 4 key Kafka topics in the system:
     - `INVENTORY_ADJUSTMENT`
     - `CYCLE_COUNT`
 
-Each topic has an associated Avro message schema (you can see these in the `schemas` module in the demo repository) and these are registered in an Apicurio Registry instance.
+Each topic has an associated Avro message schema (you can see these in the `schemas` module in the demo repository) and these are registered in an [Apicurio Registry](https://www.apicur.io/registry/) instance.
 
 ## Real-time State
 
@@ -83,7 +85,7 @@ This table can then be exposed via a server and the value of specific keys, or r
 
 ### Kafka Streams Materialized Views
 
-Kafka Streams provides a powerful abstraction called a KTable, which represents a changelog stream as a table.
+Kafka Streams provides a powerful abstraction called a [KTable](https://kafka.apache.org/41/javadoc/org/apache/kafka/streams/kstream/KTable.html), which represents a changelog stream as a table.
 Each record in the underlying stream represents an update to the table, and the KTable maintains the latest value for each key.
 When combined with state stores, KTables become queryable materialized views of your streaming data.
 
@@ -119,20 +121,42 @@ Once data is materialized into state stores, Kafka Streams' Interactive Queries 
 This provides low query latency on the current state of your streams.
 
 However, Interactive Queries introduce a complication when using a Kafka Streams deployment which has been scaled out (multiple running instances of the Kafka Streams application). 
-Kafka Streams partitions data across multiple application instances, which means any given key's state might reside on a different instance than the one receiving the query.
+Kafka Streams distributes the partitions of the application's input topic(s) across multiple application instances, which means any given key's state might reside on a different instance than the one receiving the query.
 If you have three streams-processor instances, querying for `VEH-001`'s current state requires knowing which instance holds that vehicle's partition.
 
-In this example project we have solved this challenge with a two-layer architecture:
+Kafka Streams provides functionality to help developers solve this issue. 
+Each instance of a streams application can set a `application.server` configuration values which specifies a `host:port` address for that instance.
+Kafka Streams applications can then call methods like [`metadataForAllStreamsClients`](https://kafka.apache.org/41/javadoc/org/apache/kafka/streams/KafkaStreams.html#metadataForAllStreamsClients()) on the `KafkaStreams` instance to receive a [`StreamsMetadata`](https://kafka.apache.org/41/javadoc/org/apache/kafka/streams/StreamsMetadata.html) object for each application instance.
+This allows an overall view of the state store and partition distribution across the application.
+For a more direct query, applications can call [`queryMetadataForKey`](https://kafka.apache.org/41/javadoc/org/apache/kafka/streams/KafkaStreams.html#queryMetadataForKey(java.lang.String,K,org.apache.kafka.common.serialization.Serializer)) to receive specific information on where a given key is located.
+
+While this functionality allows a streams application to locate which instance a given key is on, that is only part of the story. 
+You still need to be able to route queries to the appropriate store.
+For individual keys this is relatively straight forward, you can query any application instance for the key's location and once found issue the request to that instance. 
+However, you often need to query a range of keys and so you need to implement a system that can handle aggregating the various look-up requests.
+
+So to provide a production ready Kafka Streams based interactive query system, you need to provide application side RPC endpoints for discovering metadata and serving key and/or key range requests. 
+You then also need somewhere to host the logic for discovering, querying and aggregating the data from the distributed state stores.
+This logic could be in a library used by the querying entity or could be hosted in a central service which querying entities then call.
+
+## Implementing the Interactive Queries
+
+In this project we have opted for providing a centralised query services which handles the distributed query logic and provides a single REST API for querying the Kafka Streams instances.
+There are two key parts of this architecture:
 
 ![Interactive Queries Architecture](assets/imgs/interactive-queries.png)
 
-1. **Streams Processor (Interactive Query Server)**: Each instance of the streams-processor application exposes its local state stores via HTTP endpoints on port 7070. 
-   They also each provide a metadata endpoint that reveals which instances host which keys:
+1. **Streams Processor (Interactive Query Server)**: `streams-processor/src/main/java/com/smartship/streams/InteractiveQueryServer.java`
+   
+   Each instance of the Stream Processor application hosts an Interactive Query Server instance which implements endpoints for each of the state stores.
+   They also each provide a metadata endpoint which the Query Gateway can use to discover key locations:
 
    - `/metadata/instances/{storeName}` - Lists all instances hosting a store
    - `/metadata/instance-for-key/{storeName}/{key}` - Finds the specific instance for a key
 
-2. **Query API (Gateway)**: A stateless Quarkus service that:
+2. **Query API (Gateway)**: `query-api/src/main/java/com/smartship/api/KafkaStreamsQueryService.java`
+
+   A stateless Quarkus-based service that:
 
    - Discovers all streams-processor instances via Kubernetes headless service DNS
    - Health-checks each instance to build a list of available nodes
@@ -141,9 +165,136 @@ In this example project we have solved this challenge with a two-layer architect
 
 This architecture allows the Query API to provide a unified interface to clients while the streams-processor instances scale horizontally, each managing its portion of the partitioned state.
 
-### Example queries
+### An example query
 
-The SmartShip streams-processor maintains nine state stores, each designed to answer specific business questions:
+To show the process end-to-end, let's walk through how the system answers the question: **"How many shipments are currently in each status?"**
+
+This query requires aggregating data from multiple partitions that may be distributed across different streams-processor instances, making it a good example of how the interactive query architecture handles distributed state.
+
+#### Step 1: Creating the Materialized View (KTable)
+
+The `LogisticsTopology` class creates a materialized view by consuming the `shipment.events` topic and counting shipments by their status:
+
+```java
+KTable<String, Long> shipmentCountsByStatus = shipmentStream
+    .groupBy(
+        (_, value) -> value.getEventType().toString(),
+        Grouped.with(Serdes.String(), shipmentEventSerde)
+    )
+    .count(
+        Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as("active-shipments-by-status")
+            .withKeySerde(Serdes.String())
+            .withValueSerde(Serdes.Long())
+    );
+```
+
+This code:
+
+1. Re-keys each shipment event by its status (e.g., `IN_TRANSIT`, `DELIVERED`, `EXCEPTION`)
+2. Groups all events with the same status key together
+3. Counts the number of events per status
+4. Materializes the result into a named state store called `active-shipments-by-status`
+
+As new shipment events arrive, the counts are automatically updated in real-time.
+
+#### Step 2: Interactive Query Server Endpoints
+
+Each streams-processor instance runs an `InteractiveQueryServer` that exposes HTTP endpoints for querying its local state store partition.
+This includes an endpoint for returning the current state of the `active-shipments-by-status` store: 
+
+```java
+server.createContext("/state/active-shipments-by-status", this::handleActiveShipmentsByStatus);
+```
+
+```java
+private void handleActiveShipmentsByStatus(HttpExchange exchange) throws IOException {
+    
+    ...
+
+    ReadOnlyKeyValueStore<String, Long> store = streams.store(
+            StoreQueryParameters.fromNameAndType(
+                    "active-shipments-by-status",
+                    QueryableStoreTypes.keyValueStore()
+            )
+    );
+
+    // Query all statuses from this instance's partition
+    Map<String, Long> counts = new LinkedHashMap<>();
+    for (ShipmentEventType status : ShipmentEventType.values()) {
+        Long count = store.get(status.name());
+        counts.put(status.name(), count != null ? count : 0L);
+    }
+    sendJsonResponse(exchange, counts); 
+    
+    ...
+}
+```
+
+The server also provides metadata endpoints that the Query API uses to discover key locations:
+
+- `GET /metadata/instances/{storeName}` - Returns all instances hosting partitions of a store
+- `GET /metadata/instance-for-key/{storeName}/{key}` - Finds which instance holds a specific key
+
+#### Step 3: Query API Gateway Aggregation
+
+The Query API acts as a gateway that coordinates queries across all streams-processor instances. 
+First, it discovers healthy instances via DNS (see `query-api/src/main/java/com/smartship/api/services/StreamsInstanceDiscoveryService.java`):
+
+```java
+// Resolve all IPs for the headless Kubernetes service
+InetAddress[] addresses = InetAddress.getAllByName(headlessService);
+
+for (InetAddress address : addresses) {
+    String instanceUrl = UriBuilder.newInstance()
+        .scheme("http")
+        .host(address.getHostAddress())
+        .port(port)
+        .build()
+        .toString();
+
+    if (isInstanceHealthy(instanceUrl)) {
+        healthyInstances.add(instanceUrl);
+    }
+}
+```
+
+Then it queries all instances in parallel and merges the results (see `getAllStatusCounts` in `query-api/src/main/java/com/smartship/api/KafkaStreamsQueryService.java`):
+
+```java
+// Create parallel futures to query each instance
+List<CompletableFuture<Map<String, Long>>> futures = instances.stream()
+    .map(instance -> CompletableFuture.supplyAsync(
+        () -> queryJsonNumberMap(instance, "/state/active-shipments-by-status"),
+        executorService
+    ))
+    .collect(Collectors.toList());
+
+// Wait for all queries to complete
+CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+// Merge counts from all instances (sum values for each status)
+Map<String, Long> mergedCounts = new HashMap<>();
+for (CompletableFuture<Map<String, Long>> future : futures) {
+    Map<String, Long> instanceCounts = future.get();
+    instanceCounts.forEach((status, count) ->
+        mergedCounts.merge(status, count, Long::sum)
+    );
+}
+```
+
+#### Query Flow Diagram
+
+The following diagram illustrates the complete flow when a client requests shipment counts by status:
+
+![Query Flow Diagram](assets/imgs/query-flow.png)
+
+The key insight here is that because the state store is partitioned by key across instances, no single instance has the complete picture.
+The Query API must aggregate results from all instances to provide an accurate answer.
+For queries that target a specific key (e.g., "What is the count for IN_TRANSIT?"), the Query API can use the metadata endpoint to route the request directly to the instance holding that key's partition.
+
+### Other queries
+
+The SmartShip streams-processor maintains nine state stores in total, each designed to answer specific business questions:
 
 **Shipment Tracking**
 
@@ -188,12 +339,12 @@ These stores are exposed via the Query API with REST endpoints such as:
 - `GET /api/customers/CUST-0001/shipments` - Returns shipment stats for customer CUST-0001
 - `GET /api/orders/sla-risk` - Returns all orders at risk of SLA breach
 
-### Hybrid Queries
+## Hybrid Queries
 
-While streaming state stores excel at providing real-time aggregations, they don't contain all the context needed to answer complex business questions.
+While streaming state stores are good at providing real-time aggregations, they don't contain all the context needed to answer complex business questions.
 For example, knowing that `VEH-001` is currently at coordinates (52.5200, 13.4050) is useful, but an operator also needs to know the driver's name, the vehicle's capacity, and its home warehouse.
 
-SmartShip addresses this by combining Kafka Streams state stores with PostgreSQL reference data through hybrid queries.
+The system addresses this by combining Kafka Streams state stores with PostgreSQL reference data through hybrid queries.
 The PostgreSQL database contains relatively static reference data across six tables: warehouses, customers, vehicles, drivers, products, and routes.
 The Query API's `QueryOrchestrationService` coordinates queries across both data sources and merges the results.
 
@@ -216,10 +367,6 @@ For instance, the "enriched vehicle state" hybrid query:
   "summary": "Vehicle VEH-001 (Van, 1500kg capacity) is EN_ROUTE at 65.5 km/h, driven by Jan Kowalski"
 }
 ```
-
-Hybrid queries handle failures gracefully.
-If the Kafka Streams data is temporarily unavailable, the query still returns the PostgreSQL reference data along with a warning, rather than failing entirely.
-This resilience ensures that operators always get the best available information, even during partial system degradation.
 
 The Query API exposes hybrid queries through endpoints like:
 

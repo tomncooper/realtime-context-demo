@@ -132,16 +132,15 @@ def main() -> int:
         print("Install with your package manager (e.g., dnf install pandoc)")
         return 1
 
-    # Render Mermaid diagrams
-    print("Rendering Mermaid diagrams to PNG...")
-    render_mermaid(
-        diagrams_dir / "architecture.mmd",
-        imgs_dir / "architecture.png"
-    )
-    render_mermaid(
-        diagrams_dir / "interactive-queries.mmd",
-        imgs_dir / "interactive-queries.png"
-    )
+    # Render all Mermaid diagrams
+    mmd_files = sorted(diagrams_dir.glob("*.mmd"))
+    if not mmd_files:
+        print("No Mermaid diagrams found in", diagrams_dir)
+    else:
+        print(f"Rendering {len(mmd_files)} Mermaid diagram(s) to PNG...")
+        for mmd_file in mmd_files:
+            png_file = imgs_dir / mmd_file.with_suffix(".png").name
+            render_mermaid(mmd_file, png_file)
 
     # Generate PDF
     print("Generating PDF with pandoc...")

@@ -1,21 +1,32 @@
 flowchart LR
+    Client
     QA[Query API]
 
     subgraph SP0[streams-processor-0]
+        IQS0[Interactive Query Server]
+        KS0[Kafka Streams]
         SS0[(State Store)]
         K0[VEH-001...VEH-016]
+        IQS0 --> KS0 --> SS0
     end
 
     subgraph SP1[streams-processor-1]
+        IQS1[Interactive Query Server]
+        KS1[Kafka Streams]
         SS1[(State Store)]
         K1[VEH-017...VEH-033]
+        IQS1 --> KS1 --> SS1
     end
 
     subgraph SP2[streams-processor-2]
+        IQS2[Interactive Query Server]
+        KS2[Kafka Streams]
         SS2[(State Store)]
         K2[VEH-034...VEH-050]
+        IQS2 --> KS2 --> SS2
     end
 
-    QA --> SP0
-    QA --> SP1
-    QA --> SP2
+    Client --> QA
+    QA --> IQS0
+    QA --> IQS1
+    QA --> IQS2

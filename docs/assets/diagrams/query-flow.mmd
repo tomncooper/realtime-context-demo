@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant Client
+    participant QueryAPI as Query API Gateway
+    participant DNS as Kubernetes DNS
+    participant SP0 as streams-processor-0
+    participant SP1 as streams-processor-1
+    participant SP2 as streams-processor-2
+
+    Client->>QueryAPI: GET /api/shipments/status/all
+
+    Note over QueryAPI: Discover healthy instances
+    QueryAPI->>DNS: Resolve streams-processor-headless
+    DNS-->>QueryAPI: [10.0.0.1, 10.0.0.2, 10.0.0.3]
+
+    par Health checks
+        QueryAPI->>SP0: GET /health
+        SP0-->>QueryAPI: {"status": "UP"}
+        QueryAPI->>SP1: GET /health
+        SP1-->>QueryAPI: {"status": "UP"}
+        QueryAPI->>SP2: GET /health
+        SP2-->>QueryAPI: {"status": "UP"}
+    end
+
+    Note over QueryAPI: Query all instances in parallel
+    par Parallel state store queries
+        QueryAPI->>SP0: GET /state/active-shipments-by-status
+        SP0-->>QueryAPI: {"IN_TRANSIT": 150, "DELIVERED": 89}
+        QueryAPI->>SP1: GET /state/active-shipments-by-status
+        SP1-->>QueryAPI: {"IN_TRANSIT": 142, "DELIVERED": 95}
+        QueryAPI->>SP2: GET /state/active-shipments-by-status
+        SP2-->>QueryAPI: {"IN_TRANSIT": 138, "DELIVERED": 91}
+    end
+
+    Note over QueryAPI: Merge results by summing counts
+    QueryAPI-->>Client: {"IN_TRANSIT": 430, "DELIVERED": 275, ...}
