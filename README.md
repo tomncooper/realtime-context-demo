@@ -59,11 +59,10 @@ For a detailed description of this project see the [walk-through](docs/index.md)
 ### Required Tools
 - Java 25 LTS (or compatible JDK)
 - Maven 3.9+
+- Python 3.9+
 - Podman or Docker CLI
 - Minikube
 - kubectl
-- Git
-- Python 3.9+
 
 ### Start Minikube
 ```bash
@@ -175,7 +174,7 @@ kubectl get pods -l app=streams-processor -n smartship
 kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 ```
 
-### Query via REST API (44+ endpoints - Phase 4)
+### Query via REST API
 ```bash
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
@@ -243,31 +242,3 @@ kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
 kubectl port-forward svc/postgresql 5432:5432 -n smartship &
 psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 ```
-
-## 📚 Phase Summary
-
-**Phase 1 (Complete):** Minimal end-to-end with 1 topic, 1 state store
-**Phase 2 (Complete):** All 4 topics producing events, 6 PostgreSQL tables
-**Phase 3 (Complete):** All 6 state stores operational with full Query API
-**Phase 4 (Complete):** Full LLM query capability with hybrid queries
-**Phase 5 (Complete):** Native image builds, testing, and production hardening
-
-**Phase 5 Features:**
-- ✅ GraalVM/Mandrel native image builds for query-api
-- ✅ 5 test classes with JUnit 5, Mockito, Rest-Assured, JaCoCo
-- ✅ Exception handling with consistent JSON error responses
-- ✅ NativeImageReflectionConfig for 23 model classes
-- ✅ Build script `--native` flag support
-- ✅ Native image performance: <100ms startup, 64-128Mi memory
-- ✅ Container size: ~50MB native vs ~200MB JVM
-
-**Native vs JVM Comparison:**
-| Mode | Startup | Memory | Container Size |
-|------|---------|--------|----------------|
-| JVM | ~10s | 256-512Mi | ~200MB |
-| Native | <100ms | 64-128Mi | ~50MB |
-
-**Upcoming Phases:**
-- **Phase 6:** Demo optimization with Grafana dashboards
-- **Phase 7:** LLM chatbot integration with Quarkus LangChain4j and Ollama
-- **Phase 8:** Advanced LLM features with guardrails and analytics
