@@ -13,6 +13,8 @@ SmartShip Logistics is a real-time event streaming demonstration showcasing Kafk
 
 **Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5 ✅ COMPLETED (9 state stores, 44+ API endpoints, native image, tests)
 
+**Detailed Walkthrough:** See `docs/index.md` for in-depth documentation with architecture diagrams and query flow examples.
+
 ## Critical Architecture Concepts
 
 ### Event Flow Architecture
@@ -313,33 +315,15 @@ kubectl logs -f deployment/data-generators -n smartship
 ```bash
 kubectl port-forward svc/streams-processor 7070:7070 -n smartship &
 
-# State Store 1: active-shipments-by-status
+# Pattern: /state/{storeName} or /state/{storeName}/{key}
 curl http://localhost:7070/state/active-shipments-by-status | jq
-curl http://localhost:7070/state/active-shipments-by-status/IN_TRANSIT | jq
+curl http://localhost:7070/state/vehicle-current-state/VEH-001 | jq
 
-# State Store 2: vehicle-current-state
-curl http://localhost:7070/state/vehicle-current-state | jq
-curl http://localhost:7070/state/vehicle-current-state/VH-001 | jq
-
-# State Store 3: shipments-by-customer
-curl http://localhost:7070/state/shipments-by-customer | jq
-curl http://localhost:7070/state/shipments-by-customer/CUST-001 | jq
-
-# State Store 4: late-shipments
-curl http://localhost:7070/state/late-shipments | jq
-
-# State Store 5: warehouse-realtime-metrics (windowed)
-curl http://localhost:7070/state/warehouse-realtime-metrics | jq
-curl http://localhost:7070/state/warehouse-realtime-metrics/WH-RTM | jq
-
-# State Store 6: hourly-delivery-performance (windowed)
-curl http://localhost:7070/state/hourly-delivery-performance | jq
-curl http://localhost:7070/state/hourly-delivery-performance/WH-RTM | jq
-
-# Query StreamsMetadata (multi-instance support)
+# Multi-instance metadata
 curl http://localhost:7070/metadata/instances/active-shipments-by-status | jq
-curl http://localhost:7070/metadata/instance-for-key/active-shipments-by-status/IN_TRANSIT | jq
 ```
+
+**All 9 state stores:** `active-shipments-by-status`, `vehicle-current-state`, `shipments-by-customer`, `late-shipments`, `warehouse-realtime-metrics`, `hourly-delivery-performance`, `order-current-state`, `orders-by-customer`, `order-sla-tracking`
 
 ### Validate StatefulSet Configuration
 ```bash
@@ -356,56 +340,22 @@ kubectl exec streams-processor-0 -n smartship -- printenv APPLICATION_SERVER
 kubectl scale statefulset streams-processor -n smartship --replicas=3
 ```
 
-### Query via REST API (Phase 4: 44+ endpoints)
+### Query via REST API (44+ endpoints)
 ```bash
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
-# Shipment endpoints
+# Key examples (see Swagger UI for full API)
 curl http://localhost:8080/api/shipments/status/all | jq
-curl http://localhost:8080/api/shipments/by-status/IN_TRANSIT | jq
-curl http://localhost:8080/api/shipments/late | jq
-
-# Vehicle endpoints
-curl http://localhost:8080/api/vehicles/state | jq
 curl http://localhost:8080/api/vehicles/state/VEH-001 | jq
-
-# Customer endpoints
-curl http://localhost:8080/api/customers/shipments/all | jq
-curl http://localhost:8080/api/customers/CUST-0001/shipments | jq
-
-# Warehouse metrics endpoints
-curl http://localhost:8080/api/warehouses/metrics/all | jq
-curl http://localhost:8080/api/warehouses/WH-RTM/metrics | jq
-
-# Performance endpoints
-curl http://localhost:8080/api/performance/hourly | jq
-curl http://localhost:8080/api/performance/hourly/WH-RTM | jq
-
-# Order endpoints (Phase 4)
-curl http://localhost:8080/api/orders/state | jq
-curl http://localhost:8080/api/orders/by-customer/all | jq
-curl http://localhost:8080/api/orders/sla-risk | jq
-
-# Reference data endpoints (Phase 4 - PostgreSQL)
 curl http://localhost:8080/api/reference/warehouses | jq
-curl http://localhost:8080/api/reference/customers?limit=10 | jq
-curl http://localhost:8080/api/reference/vehicles | jq
-curl http://localhost:8080/api/reference/drivers | jq
-curl http://localhost:8080/api/reference/routes | jq
-curl http://localhost:8080/api/reference/products?limit=5 | jq
-
-# Hybrid query endpoints (Phase 4 - Kafka Streams + PostgreSQL)
 curl http://localhost:8080/api/hybrid/customers/CUST-0001/overview | jq
-curl http://localhost:8080/api/hybrid/customers/CUST-0001/sla-compliance | jq
-curl http://localhost:8080/api/hybrid/vehicles/VEH-001/enriched | jq
-curl http://localhost:8080/api/hybrid/drivers/DRV-001/tracking | jq
-curl http://localhost:8080/api/hybrid/warehouses/WH-RTM/status | jq
-curl http://localhost:8080/api/hybrid/orders/ORD-0001/details | jq
 
 # Health and OpenAPI
 curl http://localhost:8080/api/health | jq
 open http://localhost:8080/swagger-ui
 ```
+
+**Endpoint groups:** `/api/shipments/*`, `/api/vehicles/*`, `/api/customers/*`, `/api/warehouses/*`, `/api/performance/*`, `/api/orders/*`, `/api/reference/*`, `/api/hybrid/*`
 
 ### ID Formats (Critical for Queries)
 Use these exact formats when querying:
@@ -416,56 +366,22 @@ Use these exact formats when querying:
 
 ### View Kafka Events
 ```bash
-# View shipment events
-kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
-  bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic shipment.events \
-  --from-beginning \
-  --max-messages 10
-
-# View vehicle telemetry
-kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
-  bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic vehicle.telemetry \
-  --from-beginning \
-  --max-messages 5
-
-# View warehouse operations
-kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
-  bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic warehouse.operations \
-  --from-beginning \
-  --max-messages 5
-
-# View order status
-kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
-  bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 \
-  --topic order.status \
-  --from-beginning \
-  --max-messages 5
-
-# List all topics
+# List topics
 kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
   bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+# View events (replace TOPIC with: shipment.events, vehicle.telemetry, warehouse.operations, order.status)
+kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
+  bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic TOPIC --from-beginning --max-messages 5
 ```
 
 ### PostgreSQL Access
 ```bash
 kubectl port-forward svc/postgresql 5432:5432 -n smartship &
-
-# View warehouses
 psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
-
-# View customers (sample)
-psql -h localhost -U smartship -d smartship -c "SELECT * FROM customers LIMIT 10;"
-
-# View all table counts
-psql -h localhost -U smartship -d smartship -c "SELECT 'warehouses', COUNT(*) FROM warehouses UNION ALL SELECT 'customers', COUNT(*) FROM customers UNION ALL SELECT 'vehicles', COUNT(*) FROM vehicles UNION ALL SELECT 'products', COUNT(*) FROM products UNION ALL SELECT 'drivers', COUNT(*) FROM drivers UNION ALL SELECT 'routes', COUNT(*) FROM routes;"
 ```
+
+**Tables:** warehouses (5), customers (200), vehicles (50), products (10K), drivers (75), routes (100) - see `kubernetes/infrastructure/init.sql`
 
 ## Key Technology Versions
 
@@ -483,42 +399,23 @@ psql -h localhost -U smartship -d smartship -c "SELECT 'warehouses', COUNT(*) FR
 
 All versions are centralized in parent `pom.xml` properties.
 
-## Data Generators Architecture (Phase 2)
+## Data Generators Architecture
 
 The `data-generators` module contains 4 generators coordinated by `DataCorrelationManager`:
 
-### Reference Data Loading (Single Source of Truth)
-At startup, the data-generators loads all reference data from PostgreSQL:
-- **ReferenceDataLoader** connects to PostgreSQL with retry logic (30 attempts, exponential backoff)
-- Loads 6 tables: warehouses, customers, vehicles, drivers, products, routes
-- Initializes `DataCorrelationManager` with loaded data
-- PostgreSQL `kubernetes/infrastructure/init.sql` is the single source of truth
+**Key Components:**
+- **ReferenceDataLoader** - Loads reference data from PostgreSQL at startup (retry logic, single source of truth)
+- **DataCorrelationManager** - Singleton ensuring referential integrity across generators
+- **GeneratorMain** - Entry point starting all 4 generator threads
 
-**Environment Variables (data-generators):**
-- `POSTGRES_HOST` - PostgreSQL host (default: `postgresql.smartship.svc.cluster.local`)
-- `POSTGRES_USER` - Database user (default: `smartship`)
-- `POSTGRES_PASSWORD` - Database password
-- `POSTGRES_DB` - Database name (default: `smartship`)
+**Environment Variables:** `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
 
-### DataCorrelationManager (Singleton)
-Central coordinator ensuring referential integrity across all generators:
-- Initialized from PostgreSQL data at startup (no hardcoded values)
-- Tracks active shipments, orders, and vehicle states
-- Key methods: `getRandomCustomerId()`, `getRandomVehicleId()`, `registerShipment()`, `getActiveShipmentIdsForWarehouse()`
-- Files:
-  - `data-generators/src/main/java/com/smartship/generators/DataCorrelationManager.java`
-  - `data-generators/src/main/java/com/smartship/generators/ReferenceDataLoader.java`
-  - `data-generators/src/main/java/com/smartship/generators/model/*.java` (Warehouse, Customer, Vehicle, Driver, Product, Route, ReferenceData)
-
-### Four Generator Threads
-All started by `GeneratorMain.java`:
-
-| Generator | Topic | Rate | Key Features |
-|-----------|-------|------|--------------|
-| ShipmentEventGenerator | shipment.events | 50-80/sec | 9-state lifecycle, 5% exception, 2% cancelled |
-| VehicleTelemetryGenerator | vehicle.telemetry | 20-30/sec | 50 vehicles, position updates, fuel consumption |
-| WarehouseOperationGenerator | warehouse.operations | 15-25/sec | 7 operation types, 3% error rate |
-| OrderStatusGenerator | order.status | 10-15/sec | 4 SLA tiers, 1-3 shipments per order |
+| Generator | Topic | Rate |
+|-----------|-------|------|
+| ShipmentEventGenerator | shipment.events | 50-80/sec |
+| VehicleTelemetryGenerator | vehicle.telemetry | 20-30/sec |
+| WarehouseOperationGenerator | warehouse.operations | 15-25/sec |
+| OrderStatusGenerator | order.status | 10-15/sec |
 
 ## Avro Schemas (Phase 2)
 
@@ -530,25 +427,6 @@ Four schemas in `schemas/src/main/avro/`:
 | `vehicle-telemetry.avsc` | vehicle_id, location (nested), current_load (nested) | VehicleStatus (5 values) |
 | `warehouse-operation.avsc` | event_id, warehouse_id, operation_type, shipment_id (nullable) | OperationType (7 values) |
 | `order-status.avsc` | order_id, customer_id, shipment_ids (array), priority | OrderStatusType (7), OrderPriority (4) |
-
-## PostgreSQL Reference Data (Phase 2)
-
-Six tables with full-scale seed data in `kubernetes/infrastructure/init.sql`:
-
-| Table | Records | Key Columns |
-|-------|---------|-------------|
-| warehouses | 5 | warehouse_id, city, country, capacity |
-| customers | 200 | customer_id, company_name, sla_tier |
-| vehicles | 50 | vehicle_id, vehicle_type, capacity_kg, home_warehouse_id |
-| products | 10,000 | product_id, sku, category, weight_kg |
-| drivers | 75 | driver_id, name, license_type, assigned_vehicle_id |
-| routes | 100 | route_id, origin_warehouse_id, destination_city, distance_km |
-
-Query all table counts:
-```bash
-kubectl exec -it statefulset/postgresql -n smartship -- psql -U smartship -d smartship \
-  -c "SELECT 'warehouses', COUNT(*) FROM warehouses UNION ALL SELECT 'customers', COUNT(*) FROM customers UNION ALL SELECT 'vehicles', COUNT(*) FROM vehicles UNION ALL SELECT 'products', COUNT(*) FROM products UNION ALL SELECT 'drivers', COUNT(*) FROM drivers UNION ALL SELECT 'routes', COUNT(*) FROM routes;"
-```
 
 ## Adding New Event Types (Future Phases)
 
@@ -565,53 +443,16 @@ When implementing additional topics and generators:
 
 ## Phase Information
 
-**Phase 1 (✅ COMPLETED):** Minimal end-to-end with 1 topic, 1 state store
-- Topic: `shipment.events` (CREATED → IN_TRANSIT → DELIVERED)
-- State store: `active-shipments-by-status` (count by status)
-- Generator: Simple lifecycle every 6 seconds
-- Multi-instance streams-processor support with StatefulSet
+| Phase | Status | Summary |
+|-------|--------|---------|
+| 1 | ✅ | Minimal e2e: 1 topic, 1 state store, multi-instance StatefulSet |
+| 2 | ✅ | All 4 topics, 4 generators, DataCorrelationManager, 6 PostgreSQL tables |
+| 3 | ✅ | 6 state stores (4 KeyValue + 2 Windowed), 14 REST endpoints |
+| 4 | ✅ | 9 state stores, PostgreSQL integration, 44+ endpoints, hybrid queries |
+| 5 | ✅ | Native image (<100ms startup), tests, exception handling |
+| 6-8 | Pending | Demo optimization, LLM chatbot (LangChain4j + Ollama), guardrails |
 
-**Phase 2 (✅ COMPLETED):** All 4 topics producing events with full-scale reference data
-- 4 Avro schemas (1 expanded + 3 new with nested records)
-- 4 Kafka topics at specified event rates
-- 4 generators + DataCorrelationManager for referential integrity
-- 6 PostgreSQL tables with 10,430 total records (single source of truth)
-- ReferenceDataLoader loads all reference data from PostgreSQL at startup
-- Backward compatible with Phase 1 streams-processor
-
-**Phase 3 (✅ COMPLETED):** All 6 Kafka Streams state stores operational
-- 6 state stores consuming 3 topics (shipment.events, vehicle.telemetry, warehouse.operations)
-- 4 KeyValue stores: active-shipments-by-status, vehicle-current-state, shipments-by-customer, late-shipments
-- 2 Windowed stores: warehouse-realtime-metrics (15-min), hourly-delivery-performance (1-hour hopping)
-- 14 REST API endpoints across 5 resource groups (Shipments, Vehicles, Customers, Warehouses, Performance)
-- JsonSerde for custom state store value serialization
-- Multi-instance query support with parallel aggregation
-
-**Phase 4 (✅ COMPLETED):** Full LLM query capability with multi-source queries
-- 9 state stores (6 original + 3 order stores consuming order.status topic)
-- PostgreSQL reference data integration via Quarkus reactive PostgreSQL client
-- 17 reference data endpoints (`/api/reference/*`)
-- 7 hybrid query endpoints (`/api/hybrid/*`) combining Kafka Streams + PostgreSQL
-- QueryOrchestrationService for multi-source query orchestration
-- HybridQueryResult with `warnings` field for graceful error handling
-- Correct ID formats: CUST-0001 (4 digits), VEH-001 (3 digits), DRV-001 (3 digits)
-
-**Phase 5 (✅ COMPLETED):** Native image builds, testing, and production hardening
-- GraalVM/Mandrel native image compilation for query-api
-- 5 test classes with JUnit 5, Mockito, Rest-Assured, JaCoCo
-- Exception handling with consistent JSON error responses
-- NativeImageReflectionConfig registering 23 model classes
-- Build script `--native` flag support (`python3 scripts/02-build-all.py --native`)
-- Native image: <100ms startup, 64-128Mi memory, ~50MB container size
-- Key files:
-  - `query-api/src/main/java/com/smartship/api/config/NativeImageReflectionConfig.java`
-  - `query-api/src/main/java/com/smartship/api/config/ExceptionMappers.java`
-  - `query-api/src/test/java/com/smartship/api/**/*Test.java` (5 test classes)
-
-**Phase 6-8 (PENDING):** See `design/implementation-plan.md` for detailed roadmap:
-- Phase 6: Demo optimization with Grafana dashboards
-- Phase 7: LLM chatbot integration with Quarkus LangChain4j and Ollama
-- Phase 8: Advanced LLM features with guardrails and analytics
+See `design/implementation-plan.md` for detailed phase breakdown.
 
 ## Common Issues
 
