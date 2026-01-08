@@ -1,6 +1,6 @@
 # SmartShip Logistics Implementation Plan
 
-**Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5 ✅ COMPLETED | Phase 6 Pending | Phase 7-8 Pending (LLM Chatbot)
+**Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5 ✅ COMPLETED | Phase 6 ✅ COMPLETED | Phase 7-8 Pending (Advanced LLM Features)
 
 ## Overview
 
@@ -838,40 +838,89 @@ quarkus.native.resources.includes=META-INF/services/**
 | JVM | 256Mi | 512Mi | 200m | 400m | ~10s |
 | Native | 64Mi | 128Mi | 100m | 250m | <100ms |
 
-### Phase 6: Demo Optimization & Polish ⏭️ PENDING
+### Phase 6: Minimal LLM Integration ✅ COMPLETED
+**Status:** ✅ Complete
+**Timeline:** Completed January 2026
+**Goal:** Simple LLM chatbot demonstrating real-time data queries using Quarkus LangChain4j
+
+**Scope (Implemented):**
+- ✅ **LangChain4j Integration:** Quarkus LangChain4j 1.5.0.CR2 with multi-provider support
+- ✅ **AI Service:** LogisticsAssistant interface with @RegisterAiService
+- ✅ **Tool Classes:** 2 tool classes (ShipmentTools, CustomerTools) with 5 @Tool methods
+- ✅ **REST Endpoint:** `POST /api/chat` with session-based chat memory
+- ✅ **LLM Providers:** Ollama (primary), OpenAI, Anthropic (configurable via environment)
+- ✅ **Kubernetes:** Ollama StatefulSet with 20Gi storage, llama3.2 model
+
+**Tasks Completed:**
+1. ✅ Added LangChain4j dependencies to query-api/pom.xml (core, ollama, openai, anthropic)
+2. ✅ Added LLM configuration to application.properties (multi-provider support)
+3. ✅ Created ChatRequest and ChatResponse DTOs
+4. ✅ Created SessionChatMemoryProvider with 20-message window
+5. ✅ Created ShipmentTools with 3 @Tool methods (status counts, late shipments, customer stats)
+6. ✅ Created CustomerTools with 2 @Tool methods (customer overview, company search)
+7. ✅ Created LogisticsAssistant AI service interface with system message
+8. ✅ Created ChatResource REST endpoint at /api/chat
+9. ✅ Updated NativeImageReflectionConfig for AI classes
+10. ✅ Created ollama.yaml Kubernetes manifest (StatefulSet, Service, PVC)
+11. ✅ Updated kustomization.yaml to include Ollama
+
+**Deliverables (Achieved):**
+- ✅ LLM chatbot answering questions about shipments and customers
+- ✅ Real-time data from Kafka Streams state stores
+- ✅ PostgreSQL reference data integration
+- ✅ Session-based chat memory for multi-turn conversations
+- ✅ Configurable LLM backend (Ollama, OpenAI, Anthropic)
+- ✅ OpenAPI documentation for chat endpoint
+
+**Key Implementation Decisions:**
+- Used **Quarkus LangChain4j 1.5.0.CR2** for compatibility with Quarkus 3.30.1
+- Used **Ollama with llama3.2** as default local LLM (configurable via LLM_PROVIDER env var)
+- Wrapped existing services (KafkaStreamsQueryService, QueryOrchestrationService) with @Tool methods
+- Used **in-memory chat session storage** (simple for Phase 6, Redis in Phase 7+)
+- Extended existing query-api module rather than creating new module
+
+**Minikube Requirements Update:**
+```bash
+minikube start --cpus=6 --memory=16384 --disk-size=80g
+```
+
+**Environment Variables:**
+- `LLM_PROVIDER`: ollama (default), openai, or anthropic
+- `OLLAMA_BASE_URL`: Ollama service URL (default: http://ollama.smartship.svc.cluster.local:11434)
+- `OPENAI_API_KEY`: OpenAI API key (optional, for cloud LLM)
+- `ANTHROPIC_API_KEY`: Anthropic API key (optional, for cloud LLM)
+
+**Files Created:**
+- `query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java`
+- `query-api/src/main/java/com/smartship/api/ai/ChatResource.java`
+- `query-api/src/main/java/com/smartship/api/ai/ChatRequest.java`
+- `query-api/src/main/java/com/smartship/api/ai/ChatResponse.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java`
+- `kubernetes/infrastructure/ollama.yaml`
+
+**Example Queries:**
+1. "How many shipments are currently in transit?"
+2. "Which shipments are delayed?"
+3. "Show me the shipment stats for customer CUST-0001"
+4. "Find customers with 'Tech' in their name"
+5. "Give me an overview of customer CUST-0050"
+
+### Phase 7: Advanced LLM Features ⏭️ PENDING
 **Status:** Pending
-**Goal:** Demo-ready with example queries and presentations
+**Goal:** Comprehensive tool coverage, input/output guardrails, WebSocket streaming, and observability
 
-**Deliverables:**
-- Demo-ready system with all features
-- Sample LLM query scripts for common logistics questions
-- Presentation materials and architecture diagrams
-- Performance benchmarks and metrics dashboards
-- Video walkthrough and demo script
-
-**Building on Phase 5:**
-- Create demo scenarios showcasing real-time queries
-- Create Grafana dashboards for metrics visualization
-
-### Phase 7: LLM Chatbot Integration (Quarkus LangChain4j) ⏭️ PENDING
-**Status:** Pending
-**Goal:** Intelligent chatbot with real-time data access using Quarkus LangChain4j and Ollama
-
-**Architecture Decision:** Extend the existing `query-api` module rather than creating a new module.
-
-**Rationale:**
-- Direct access to `KafkaStreamsQueryService` and other services
-- LangChain4j tools integrate seamlessly with existing CDI beans
-- Simpler deployment and configuration
-- Single entry point for all query operations
+**Building on Phase 6:**
+Phase 6 established the foundation with ShipmentTools and CustomerTools. Phase 7 expands to full production-ready capabilities with additional tools, guardrails, and streaming.
 
 **Scope:**
-- **AI Service:** LogisticsAssistant with `@RegisterAiService`, session-scoped chat
-- **6 Tool Classes:** Shipment, Vehicle, Warehouse, Customer, Performance, ReferenceData tools
+- **4 Additional Tool Classes:** VehicleTools, WarehouseTools, PerformanceTools, ReferenceDataTools (13 new methods)
 - **Input Guardrail:** LogisticsInScopeGuard for question validation
-- **Chat Memory:** In-memory session storage with 20-message window
-- **Endpoints:** REST (`/api/chat`, `/api/chat/stream`) and WebSocket (`/ws/chat`)
-- **LLM Backend:** Ollama with llama3.2 model deployed on Kubernetes
+- **Output Guardrails:** DataFactualityGuard, ResponseFormatGuard
+- **SSE Streaming:** `POST /api/chat/stream` endpoint
+- **WebSocket:** `/ws/chat` for bidirectional streaming
+- **Observability:** ChatAuditObserver for logging
 
 **Dependencies to Add (query-api/pom.xml):**
 ```xml

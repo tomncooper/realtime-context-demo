@@ -81,6 +81,34 @@
             <artifactId>quarkus-reactive-pg-client</artifactId>
         </dependency>
 
+        <!-- LangChain4j for LLM Integration -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-core</artifactId>
+            <version>${quarkus-langchain4j.version}</version>
+        </dependency>
+
+        <!-- Ollama Provider (primary - local Kubernetes) -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-ollama</artifactId>
+            <version>${quarkus-langchain4j.version}</version>
+        </dependency>
+
+        <!-- OpenAI Provider (optional - cloud) -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-openai</artifactId>
+            <version>${quarkus-langchain4j.version}</version>
+        </dependency>
+
+        <!-- Anthropic Provider (optional - cloud) -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-anthropic</artifactId>
+            <version>${quarkus-langchain4j.version}</version>
+        </dependency>
+
         <!-- Testing -->
         <dependency>
             <groupId>io.quarkus</groupId>

@@ -28,6 +28,7 @@
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.12</logback.version>
         <jackson.version>2.18.2</jackson.version>
+        <quarkus-langchain4j.version>1.5.0.CR2</quarkus-langchain4j.version>
 
         <!-- Maven Plugins -->
         <jib.version>3.5.1</jib.version>

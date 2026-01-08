@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate SmartShip deployment - Phase 4 with all 9 state stores and hybrid queries."""
+"""Validate SmartShip infrastructure deployment"""
 import json
 import sys
 import time
@@ -524,6 +524,110 @@ def test_hybrid_query_api():
             print(f"   Response: {result.stdout[:200]}")
 
 
+def validate_ollama():
+    """Validate Ollama is running (optional - for LLM chat functionality).
+
+    Returns True if Ollama is available, False otherwise.
+    """
+    print("\n=== Validating Ollama (LLM Service) ===")
+
+    # Check Ollama StatefulSet status
+    result = run_command([
+        'kubectl', 'get', 'statefulset', 'ollama', '-n', NAMESPACE,
+        '-o', 'jsonpath={.status.readyReplicas}/{.spec.replicas}'
+    ], capture_output=True, check=False)
+
+    if result.returncode == 0 and result.stdout.strip():
+        replicas = result.stdout.strip()
+        print(f"Ollama replicas ready: {replicas}")
+        # Check if at least one replica is ready
+        parts = replicas.split('/')
+        if len(parts) == 2 and parts[0] and int(parts[0]) > 0:
+            return True
+        print("  Warning: Ollama not ready yet")
+        return False
+    else:
+        print("Ollama deployment not found (chat validation will be skipped)")
+        return False
+
+
+def test_chat_api():
+    """Test LLM chat API endpoints (Phase 6)."""
+    print("\n--- Testing Chat API (LangChain4j + Ollama) ---")
+
+    # Test 1: Health check
+    print("\n1. Chat health check:")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/chat/health'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            status = data.get('status', 'UNKNOWN')
+            service = data.get('service', 'N/A')
+            print(f"   Status: {status}")
+            print(f"   Service: {service}")
+            if status != 'UP':
+                print("   Warning: Chat service not healthy, skipping remaining chat tests")
+                return
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+            return
+
+    # Test 2: Session count (before chat)
+    print("\n2. Active sessions (before test):")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/chat/sessions/count'],
+        capture_output=True
+    )
+    sessions_before = 0
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            sessions_before = data.get('active_sessions', 0)
+            print(f"   Active sessions: {sessions_before}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test 3: Basic chat interaction
+    print("\n3. Chat interaction (may take a few seconds):")
+    result = run_command([
+        'curl', '-s', '-X', 'POST', 'http://localhost:8080/api/chat',
+        '-H', 'Content-Type: application/json',
+        '-d', '{"message": "How many shipments are in transit?"}'
+    ], capture_output=True)
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            session_id = data.get('sessionId', 'N/A')
+            sources = data.get('sources', [])
+            response = data.get('response', '')
+            print(f"   Session ID: {session_id[:8]}..." if len(session_id) > 8 else f"   Session ID: {session_id}")
+            print(f"   Sources: {sources}")
+            # Truncate response for display
+            response_preview = response[:100] + "..." if len(response) > 100 else response
+            print(f"   Response: {response_preview}")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+    # Test 4: Session count (after chat)
+    print("\n4. Active sessions (after test):")
+    result = run_command(
+        ['curl', '-s', 'http://localhost:8080/api/chat/sessions/count'],
+        capture_output=True
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            sessions_after = data.get('active_sessions', 0)
+            print(f"   Active sessions: {sessions_after}")
+            if sessions_after > sessions_before:
+                print(f"   New session created successfully")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+
+
 def validate_statefulset():
     """Validate StatefulSet configuration for streams-processor."""
     print("\n=== Validating Streams Processor StatefulSet ===")
@@ -564,8 +668,8 @@ def validate_statefulset():
 
 def main():
     print("=" * 60)
-    print("SmartShip Logistics - Phase 4 Validation")
-    print("Testing all 9 state stores + PostgreSQL + Hybrid Queries")
+    print("SmartShip Logistics - Phase 6 Validation")
+    print("Testing all 9 state stores + PostgreSQL + Hybrid Queries + LLM Chat")
     print("=" * 60)
 
     print("\n=== Validating Infrastructure ===")
@@ -606,8 +710,16 @@ def main():
     print("\n=== Testing Hybrid Query API (Kafka Streams + PostgreSQL) ===")
     port_forward_and_test('query-api', 8080, test_hybrid_query_api)
 
+    # Validate Ollama and Chat API (Phase 6) - gracefully skip if unavailable
+    ollama_available = validate_ollama()
+    if ollama_available:
+        print("\n=== Testing Chat API (LangChain4j + LLM) ===")
+        port_forward_and_test('query-api', 8080, test_chat_api)
+    else:
+        print("\n=== Skipping Chat API tests (Ollama not available) ===")
+
     print("\n" + "=" * 60)
-    print("Phase 4 Validation Complete!")
+    print("Phase 6 Validation Complete!")
     print("=" * 60)
     print("\nAll 9 state stores verified:")
     print("  1. active-shipments-by-status")
@@ -623,6 +735,10 @@ def main():
     print("  - 17 PostgreSQL reference data endpoints")
     print("  - 6 Order state query endpoints")
     print("  - 7 Hybrid query endpoints (Kafka + PostgreSQL)")
+    print("\nPhase 6 additions:")
+    print("  - 4 Chat API endpoints (/api/chat/*)")
+    print("  - LangChain4j integration with Ollama")
+    print("  - Session-based chat memory")
     print("=" * 60)
 
     return 0

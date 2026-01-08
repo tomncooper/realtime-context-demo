@@ -3,6 +3,10 @@ kind: Kustomization
 
 namespace: smartship
 
+# Note: ollama.yaml is NOT included here - it is applied separately
+# by scripts/01-setup-infra.py to support either:
+#   - ollama.yaml (standard PVC-based, downloads model in-cluster)
+#   - ollama-hostpath.yaml (pre-loaded models via --models flag)
 resources:
   - namespace.yaml
   - kafka-cluster.yaml

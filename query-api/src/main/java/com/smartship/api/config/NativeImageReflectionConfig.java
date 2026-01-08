@@ -36,7 +36,11 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
     com.smartship.api.model.hybrid.EnrichedLateShipment.Builder.class,
     com.smartship.api.model.hybrid.EnrichedVehicleState.class,
     com.smartship.api.model.hybrid.EnrichedVehicleState.Builder.class,
-    com.smartship.api.model.hybrid.HybridQueryResult.class
+    com.smartship.api.model.hybrid.HybridQueryResult.class,
+
+    // AI Chat models (Phase 6)
+    com.smartship.api.ai.ChatRequest.class,
+    com.smartship.api.ai.ChatResponse.class
 })
 public class NativeImageReflectionConfig {
     // Configuration class - no implementation needed

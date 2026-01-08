@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
-
+from pathlib import Path
 from pprint import pprint
 from typing import List
 
@@ -158,8 +158,9 @@ def verify_kafka_data_flow(
     print(f"Attempting to read up to {max_messages} messages (timeout: {timeout}s)...")
 
     # Use kubectl exec to run kafka-console-consumer
+    # Note: Don't use -t flag (TTY) when running non-interactively
     cmd = [
-        'kubectl', 'exec', '-it', pod_name, '-n', namespace, '--',
+        'kubectl', 'exec', '-i', pod_name, '-n', namespace, '--',
         '/opt/kafka/bin/kafka-console-consumer.sh',
         '--bootstrap-server', 'localhost:9092',
         '--topic', topic,
@@ -201,3 +202,165 @@ def verify_kafka_data_flow(
     except Exception as e:
         print(f"Error verifying Kafka data flow: {e}")
         raise
+
+
+def ensure_ollama_models(models: List[str]) -> bool:
+    """Ensure Ollama models are available locally, downloading if necessary.
+
+    Args:
+        models: List of model names (e.g., ['llama3.2', 'mistral'])
+
+    Returns:
+        True if all models are available (downloaded or already present)
+    """
+    # Check if ollama is installed
+    ollama_path = shutil.which('ollama')
+    if ollama_path is None:
+        print("ERROR: ollama not found in PATH. Please install Ollama first.")
+        print("  Visit: https://ollama.ai/download")
+        return False
+
+    # Get list of locally available models via ollama list
+    result = run_command(['ollama', 'list'], capture_output=True, check=False)
+    available_models = set()
+    if result.returncode == 0 and result.stdout:
+        for line in result.stdout.strip().split('\n')[1:]:  # Skip header row
+            if line.strip():
+                # Model name is first column, may include :tag
+                model_name = line.split()[0].split(':')[0]
+                available_models.add(model_name)
+
+    print(f"Locally available models: {available_models if available_models else 'none'}")
+
+    for model in models:
+        model_base = model.split(':')[0]  # Handle model:tag format
+        if model_base in available_models:
+            print(f"✓ Model '{model}' already available locally")
+        else:
+            print(f"Model '{model}' not found locally, downloading...")
+            pull_result = run_command(['ollama', 'pull', model], check=False)
+            if pull_result.returncode != 0:
+                print(f"ERROR: Failed to download model '{model}'")
+                return False
+            print(f"✓ Model '{model}' downloaded successfully")
+
+    return True
+
+
+def upload_ollama_models_to_minikube() -> bool:
+    """Copy local Ollama data directory to minikube node for pre-loading.
+
+    This copies the entire Ollama data directory to a hostPath location
+    on the minikube node, allowing the Ollama pod to use pre-loaded models
+    without downloading them again.
+
+    Checks multiple possible locations for Ollama data:
+    - ~/.ollama (user installation)
+    - /usr/share/ollama/.ollama (Linux system service, requires sudo)
+
+    Returns:
+        True if upload was successful
+    """
+    # Check multiple possible Ollama data locations
+    # For user installation, we can access directly
+    # For system service, we need sudo to access
+    user_ollama = Path.home() / ".ollama"
+    system_ollama = Path("/usr/share/ollama/.ollama")
+
+    ollama_dir = None
+    needs_sudo = False
+
+    if user_ollama.exists() and (user_ollama / "models").exists():
+        ollama_dir = user_ollama
+        needs_sudo = False
+    else:
+        # Check system location (may need sudo)
+        result = run_command(
+            ['sudo', 'test', '-d', str(system_ollama / "models")],
+            check=False, capture_output=True
+        )
+        if result.returncode == 0:
+            ollama_dir = system_ollama
+            needs_sudo = True
+
+    if ollama_dir is None:
+        print("ERROR: Ollama data directory not found. Checked:")
+        print(f"  - {user_ollama}")
+        print(f"  - {system_ollama} (with sudo)")
+        return False
+
+    print(f"Found Ollama data at: {ollama_dir}" + (" (requires sudo)" if needs_sudo else ""))
+
+    # Create target directory on minikube node
+    result = run_command(
+        ['minikube', 'ssh', 'sudo mkdir -p /data/ollama-models'],
+        check=False
+    )
+    if result.returncode != 0:
+        print("ERROR: Failed to create directory on minikube node")
+        return False
+
+    print("Copying model files (this may take a moment for large models)...")
+
+    if needs_sudo:
+        # For system Ollama, we need to use sudo to read the files
+        # Create a temporary tarball in /tmp (sudo writes here, then we copy)
+        tmp_tar = '/tmp/ollama-models-upload.tar'
+
+        print("  Creating tarball of Ollama data (requires sudo)...")
+        # Remove any existing tarball first
+        run_command(['sudo', 'rm', '-f', tmp_tar], check=False, capture_output=True)
+
+        result = run_command(
+            ['sudo', 'tar', '-cf', tmp_tar, '-C', str(ollama_dir), '.'],
+            check=False
+        )
+        if result.returncode != 0:
+            print("ERROR: Failed to create tarball of Ollama data")
+            run_command(['sudo', 'rm', '-f', tmp_tar], check=False, capture_output=True)
+            return False
+
+        # Make tarball readable by current user for minikube cp
+        run_command(['sudo', 'chmod', '644', tmp_tar], check=False)
+
+        print("  Copying tarball to minikube...")
+        result = run_command(
+            ['minikube', 'cp', tmp_tar, '/tmp/ollama-data.tar'],
+            check=False
+        )
+        if result.returncode != 0:
+            print("ERROR: Failed to copy tarball to minikube")
+            run_command(['sudo', 'rm', '-f', tmp_tar], check=False, capture_output=True)
+            return False
+
+        print("  Extracting on minikube node...")
+        result = run_command(
+            ['minikube', 'ssh', 'sudo tar -xf /tmp/ollama-data.tar -C /data/ollama-models && sudo rm -f /tmp/ollama-data.tar'],
+            check=False
+        )
+        if result.returncode != 0:
+            print("ERROR: Failed to extract tarball on minikube")
+            run_command(['sudo', 'rm', '-f', tmp_tar], check=False, capture_output=True)
+            return False
+
+        # Clean up local tarball
+        run_command(['sudo', 'rm', '-f', tmp_tar], check=False, capture_output=True)
+    else:
+        # Direct copy for user installation
+        src_path = str(ollama_dir)
+        result = run_command(
+            ['minikube', 'cp', f'{src_path}/.', '/data/ollama-models'],
+            check=False
+        )
+        if result.returncode != 0:
+            print("ERROR: Failed to copy models to minikube node")
+            return False
+
+    # Set proper permissions for Ollama container (runs as root by default)
+    run_command(
+        ['minikube', 'ssh', 'sudo chmod -R 755 /data/ollama-models'],
+        check=False
+    )
+
+    print("✓ Ollama models uploaded to minikube successfully")
+    return True

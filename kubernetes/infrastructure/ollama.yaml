@@ -1,0 +1,162 @@
+# Ollama LLM Server for SmartShip Logistics Assistant
+# Phase 6: Local LLM deployment for the chatbot
+#
+# MODEL PRE-LOADING (optional - avoids download on first deploy):
+# 1. Download model locally:  ollama pull llama3.2
+# 2. Copy to minikube node:   minikube ssh "sudo mkdir -p /data/ollama-models"
+#                             minikube cp ~/.ollama/models /data/ollama-models
+# 3. Deploy with hostPath:    The hostPath volume below will use pre-loaded models
+#
+# If no pre-loaded models exist, the init container will download on first deploy.
+# The PVC ensures models persist across pod restarts.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: smartship
+  labels:
+    app: ollama
+    component: llm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 11434
+      targetPort: 11434
+      protocol: TCP
+      name: http
+  selector:
+    app: ollama
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama
+  namespace: smartship
+  labels:
+    app: ollama
+    component: llm
+spec:
+  serviceName: ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+        component: llm
+    spec:
+      # Init container pulls model if not already present
+      initContainers:
+        - name: model-loader
+          image: ollama/ollama:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting Ollama server in background..."
+              ollama serve &
+              SERVER_PID=$!
+
+              # Wait for server to be ready
+              echo "Waiting for Ollama server to start..."
+              for i in $(seq 1 30); do
+                if ollama list >/dev/null 2>&1; then
+                  echo "Ollama server is ready"
+                  break
+                fi
+                sleep 1
+              done
+
+              # Check if model already exists
+              if ollama list | grep -q "llama3.2"; then
+                echo "Model llama3.2 already present, skipping download"
+              else
+                echo "Pulling llama3.2 model (this may take several minutes)..."
+                ollama pull llama3.2
+                echo "Model pull complete"
+              fi
+
+              # Stop the server
+              kill $SERVER_PID 2>/dev/null || true
+              echo "Init container complete"
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            # Keep models in memory for faster responses
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2000m"
+            limits:
+              memory: "8Gi"
+              cpu: "4000m"
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+          # Readiness probe - check if model is loaded and ready
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "ollama list | grep -q llama3.2"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Liveness probe - ensure Ollama is still running
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 11434
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: ollama-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+# Alternative: Use hostPath for model pre-loading from local machine
+# Uncomment this and comment out volumeClaimTemplates above to use pre-loaded models
+#
+# To pre-load models:
+#   1. minikube ssh "sudo mkdir -p /data/ollama-models"
+#   2. Copy your local ~/.ollama directory contents:
+#      minikube cp ~/.ollama/models/. /data/ollama-models/models/
+#
+# Then update the StatefulSet to use this volume instead of PVC:
+#   volumes:
+#     - name: ollama-data
+#       hostPath:
+#         path: /data/ollama-models
+#         type: DirectoryOrCreate

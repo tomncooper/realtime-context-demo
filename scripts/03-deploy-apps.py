@@ -3,7 +3,6 @@
 import sys
 from common import (
     kubectl,
-    run_command,
     wait_for_condition,
     wait_for_statefulset_ready,
     verify_kafka_data_flow,
@@ -48,6 +47,7 @@ def main():
     print("=" * 60)
 
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())

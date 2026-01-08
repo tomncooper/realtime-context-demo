@@ -11,7 +11,7 @@ This means you should automatically use the Context7 MCP tools to resolve librar
 
 SmartShip Logistics is a real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics and fulfillment company. The project is implemented as a Maven multi-module monorepo deployed on Kubernetes (minikube).
 
-**Current Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5 ✅ COMPLETED (9 state stores, 44+ API endpoints, native image, tests)
+**Current Status:** Phase 1-5 ✅ COMPLETED | Phase 6 ✅ COMPLETED (LLM chatbot with LangChain4j + Ollama) | Phase 7-8 Pending
 
 **Detailed Walkthrough:** See `docs/index.md` for in-depth documentation with architecture diagrams and query flow examples.
 
@@ -140,6 +140,42 @@ Query-API → Instance Discovery → [Pod-0, Pod-1, Pod-2]
 4. Uses `metadataForKey()` to route specific key queries to correct instance
 5. Uses parallel queries with `CompletableFuture` for aggregate queries across all instances
 
+### Phase 6: LLM Chatbot Architecture
+The Query API includes an LLM chatbot for natural language queries:
+
+```
+Query-API
+    ├── ChatResource → /api/chat endpoint
+    ├── LogisticsAssistant → @RegisterAiService AI interface
+    ├── ShipmentTools → 3 @Tool methods for shipment queries
+    ├── CustomerTools → 2 @Tool methods for customer queries
+    └── SessionChatMemoryProvider → In-memory session storage
+```
+
+**LLM Providers (configurable via LLM_PROVIDER env var):**
+- **Ollama** (default): Local LLM with llama3.2 model
+- **OpenAI**: Cloud LLM (requires OPENAI_API_KEY)
+- **Anthropic**: Cloud LLM (requires ANTHROPIC_API_KEY)
+
+**Chat Endpoints:**
+- `POST /api/chat` - Send chat message, get AI response
+- `GET /api/chat/health` - Check LLM service health
+- `GET /api/chat/sessions/count` - Get active session count
+- `DELETE /api/chat/sessions/{sessionId}` - Clear session
+
+**Environment Variables:**
+- `LLM_PROVIDER`: ollama (default), openai, or anthropic
+- `OLLAMA_BASE_URL`: Ollama service URL (default: http://ollama.smartship.svc.cluster.local:11434)
+- `OPENAI_API_KEY`: OpenAI API key (optional)
+- `ANTHROPIC_API_KEY`: Anthropic API key (optional)
+
+**Key Files (Phase 6):**
+- `query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java`
+- `query-api/src/main/java/com/smartship/api/ai/ChatResource.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java`
+- `kubernetes/infrastructure/ollama.yaml`
+
 ## Build Commands
 
 ### Initial Setup
@@ -222,10 +258,17 @@ mvn verify -pl query-api
 
 ```bash
 # Prerequisites: minikube running with adequate resources
+# Without Ollama (Phase 1-5):
 minikube start --cpus=4 --memory=12288 --disk-size=50g
 
-# 1. Setup infrastructure (Strimzi, Kafka KRaft, Apicurio, PostgreSQL)
+# With Ollama for LLM chat (Phase 6+):
+minikube start --cpus=6 --memory=16384 --disk-size=80g
+
+# 1. Setup infrastructure (Strimzi, Kafka KRaft, Apicurio, PostgreSQL, Ollama)
 python3 scripts/01-setup-infra.py
+
+# Or with pre-loaded models (faster startup, avoids in-cluster download):
+python3 scripts/01-setup-infra.py --models llama3.2
 
 # 2. Build all modules and container images
 python3 scripts/02-build-all.py
@@ -355,7 +398,7 @@ curl http://localhost:8080/api/health | jq
 open http://localhost:8080/swagger-ui
 ```
 
-**Endpoint groups:** `/api/shipments/*`, `/api/vehicles/*`, `/api/customers/*`, `/api/warehouses/*`, `/api/performance/*`, `/api/orders/*`, `/api/reference/*`, `/api/hybrid/*`
+**Endpoint groups:** `/api/shipments/*`, `/api/vehicles/*`, `/api/customers/*`, `/api/warehouses/*`, `/api/performance/*`, `/api/orders/*`, `/api/reference/*`, `/api/hybrid/*`, `/api/chat/*`
 
 ### ID Formats (Critical for Queries)
 Use these exact formats when querying:
@@ -383,6 +426,29 @@ psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 
 **Tables:** warehouses (5), customers (200), vehicles (50), products (10K), drivers (75), routes (100) - see `kubernetes/infrastructure/init.sql`
 
+### Query Chat API (LLM)
+```bash
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+
+# Chat with LLM
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How many shipments are in transit?"}'
+
+# Check chat health
+curl http://localhost:8080/api/chat/health
+
+# Get active session count
+curl http://localhost:8080/api/chat/sessions/count
+```
+
+**Example Queries:**
+1. "How many shipments are currently in transit?"
+2. "Which shipments are delayed?"
+3. "Show me the shipment stats for customer CUST-0001"
+4. "Find customers with 'Tech' in their name"
+5. "Give me an overview of customer CUST-0050"
+
 ## Key Technology Versions
 
 **Critical:** These specific versions are required for compatibility:
@@ -392,6 +458,7 @@ psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 - **Avro:** 1.12.1
 - **Apicurio Registry:** 3.1.4
 - **Quarkus:** 3.30.1
+- **Quarkus LangChain4j:** 1.5.0.CR2 (LLM integration)
 - **PostgreSQL:** 15 (postgres:15-alpine)
 - **SLF4J:** 2.0.17
 - **Logback:** 1.5.12
@@ -450,7 +517,8 @@ When implementing additional topics and generators:
 | 3 | ✅ | 6 state stores (4 KeyValue + 2 Windowed), 14 REST endpoints |
 | 4 | ✅ | 9 state stores, PostgreSQL integration, 44+ endpoints, hybrid queries |
 | 5 | ✅ | Native image (<100ms startup), tests, exception handling |
-| 6-8 | Pending | Demo optimization, LLM chatbot (LangChain4j + Ollama), guardrails |
+| 6 | ✅ | LLM chatbot with LangChain4j 1.5.0.CR2, Ollama, multi-provider support |
+| 7-8 | Pending | Advanced LLM features: guardrails, streaming, observability |
 
 See `design/implementation-plan.md` for detailed phase breakdown.
 
