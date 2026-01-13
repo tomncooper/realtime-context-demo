@@ -32,6 +32,9 @@ public class ShipmentEventGenerator {
     private static final double EXCEPTION_RATE = 0.05;
     private static final double CANCELLATION_RATE = 0.02;
 
+    // Rate of shipments that will be generated as "already late"
+    private static final double LATE_SHIPMENT_RATE = 0.05;
+
     // SLA durations in milliseconds
     private static final long SLA_STANDARD = 5L * 24 * 60 * 60 * 1000;  // 5 days
     private static final long SLA_EXPRESS = 2L * 24 * 60 * 60 * 1000;   // 2 days
@@ -99,9 +102,16 @@ public class ShipmentEventGenerator {
         String customerId = correlationManager.getRandomCustomerId();
         DestinationInfo destination = correlationManager.getRandomDestination();
 
-        // Calculate expected delivery based on random SLA tier
+        // Calculate expected delivery - some shipments are intentionally "late"
         long now = System.currentTimeMillis();
-        long expectedDelivery = now + selectSlaOffset();
+        long expectedDelivery;
+        if (ThreadLocalRandom.current().nextDouble() < LATE_SHIPMENT_RATE) {
+            // This shipment will be late (expected delivery in the past)
+            expectedDelivery = now + selectLateOffset();
+            LOG.debug("Creating late shipment with past expected delivery");
+        } else {
+            expectedDelivery = now + selectSlaOffset();
+        }
 
         // Register with correlation manager
         correlationManager.registerShipment(shipmentId, warehouseId, customerId,
@@ -228,6 +238,17 @@ public class ShipmentEventGenerator {
         if (rand < 0.85) return SLA_EXPRESS;
         if (rand < 0.95) return SLA_SAME_DAY;
         return SLA_CRITICAL;
+    }
+
+    /**
+     * Calculate a past expected delivery time for simulating late shipments.
+     * Returns a negative offset that places expected delivery 35-90 minutes in the past,
+     * ensuring the shipment is immediately past the 30-minute grace period.
+     */
+    private long selectLateOffset() {
+        long minOffset = 35L * 60 * 1000;  // 35 minutes
+        long maxOffset = 90L * 60 * 1000;  // 90 minutes
+        return -(minOffset + ThreadLocalRandom.current().nextLong(maxOffset - minOffset));
     }
 
     /**

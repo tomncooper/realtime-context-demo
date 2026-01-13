@@ -907,97 +907,98 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 4. "Find customers with 'Tech' in their name"
 5. "Give me an overview of customer CUST-0050"
 
-### Phase 7: Advanced LLM Features ⏭️ PENDING
+### Phase 7: Additional Tools & Web UI ⏭️ PENDING
 **Status:** Pending
-**Goal:** Comprehensive tool coverage, input/output guardrails, WebSocket streaming, and observability
+**Goal:** Expand LLM tool coverage and add web-based chat interface for demos
 
 **Building on Phase 6:**
-Phase 6 established the foundation with ShipmentTools and CustomerTools. Phase 7 expands to full production-ready capabilities with additional tools, guardrails, and streaming.
+Phase 6 established the foundation with ShipmentTools (3 methods), CustomerTools (2 methods), and WarehouseTools (2 methods). Phase 7 adds remaining tool classes and a simple web UI for demos.
 
 **Scope:**
-- **4 Additional Tool Classes:** VehicleTools, WarehouseTools, PerformanceTools, ReferenceDataTools (13 new methods)
-- **Input Guardrail:** LogisticsInScopeGuard for question validation
-- **Output Guardrails:** DataFactualityGuard, ResponseFormatGuard
-- **SSE Streaming:** `POST /api/chat/stream` endpoint
-- **WebSocket:** `/ws/chat` for bidirectional streaming
-- **Observability:** ChatAuditObserver for logging
 
-**Dependencies to Add (query-api/pom.xml):**
-```xml
-<dependency>
-    <groupId>io.quarkiverse.langchain4j</groupId>
-    <artifactId>quarkus-langchain4j-core</artifactId>
-</dependency>
-<dependency>
-    <groupId>io.quarkiverse.langchain4j</groupId>
-    <artifactId>quarkus-langchain4j-ollama</artifactId>
-</dependency>
-<dependency>
-    <groupId>io.quarkus</groupId>
-    <artifactId>quarkus-websockets-next</artifactId>
-</dependency>
-<dependency>
-    <groupId>io.quarkus</groupId>
-    <artifactId>quarkus-reactive-pg-client</artifactId>
-</dependency>
-```
+**Part A: Additional Tool Classes (3 new classes)**
+- **VehicleTools:** Vehicle state, location, and fleet queries
+- **PerformanceTools:** Hourly delivery performance and warehouse metrics queries
+- **ReferenceDataTools:** PostgreSQL reference data queries (products, drivers, routes)
+
+**Part B: Web UI**
+- Simple static HTML with `wc-chatbot` web component (CDN-loaded via jsDelivr)
+- No build tooling required (no npm/Node.js)
+- Connects to existing `/api/chat` REST endpoint
+- Example query suggestions panel for demo convenience
+- SmartShip Logistics branding
+
+**No New Dependencies Required:**
+- wc-chatbot loaded via CDN (jsDelivr)
+- Quarkus automatically serves static files from `META-INF/resources`
 
 **Files to Create:**
 | File | Description |
 |------|-------------|
-| `api/ai/LogisticsAssistant.java` | AI service interface with `@RegisterAiService` |
-| `api/ai/ChatResource.java` | REST endpoints for chat |
-| `api/ai/WebSocketChatEndpoint.java` | WebSocket endpoint for streaming |
-| `api/ai/tools/ShipmentQueryTools.java` | Shipment status and late shipment tools |
-| `api/ai/tools/VehicleQueryTools.java` | Vehicle state and location tools |
-| `api/ai/tools/WarehouseQueryTools.java` | Warehouse metrics tools |
-| `api/ai/tools/CustomerQueryTools.java` | Customer shipment stats tools |
-| `api/ai/tools/PerformanceQueryTools.java` | Hourly delivery performance tools |
-| `api/ai/tools/ReferenceDataTools.java` | PostgreSQL reference data tools |
-| `api/ai/guardrails/LogisticsInScopeGuard.java` | Input guardrail |
-| `api/ai/memory/InMemoryChatMemoryStore.java` | Chat session memory |
-| `kubernetes/infrastructure/ollama.yaml` | Ollama StatefulSet deployment |
+| `api/ai/tools/VehicleTools.java` | Vehicle state and fleet queries (3-4 @Tool methods) |
+| `api/ai/tools/PerformanceTools.java` | Delivery performance queries (2-3 @Tool methods) |
+| `api/ai/tools/ReferenceDataTools.java` | Reference data queries (3-4 @Tool methods) |
+| `META-INF/resources/index.html` | Main chat UI page with wc-chatbot component |
+| `META-INF/resources/chat.js` | JavaScript to connect UI to /api/chat endpoint |
+| `META-INF/resources/styles.css` | SmartShip Logistics theme styling |
 
-**Configuration (application.properties):**
-```properties
-# Ollama Configuration
-quarkus.langchain4j.ollama.base-url=http://ollama.smartship.svc.cluster.local:11434
-quarkus.langchain4j.ollama.chat-model.model-id=llama3.2
-quarkus.langchain4j.ollama.chat-model.temperature=0.3
-quarkus.langchain4j.ollama.timeout=120s
+**Files to Modify:**
+| File | Change |
+|------|--------|
+| `api/ai/LogisticsAssistant.java` | Register VehicleTools, PerformanceTools, ReferenceDataTools in @RegisterAiService |
 
-# Dev Services (local development)
-quarkus.langchain4j.ollama.devservices.enabled=true
+**Web UI Details:**
 
-# Chat Memory
-quarkus.langchain4j.chat-memory.type=message-window
-quarkus.langchain4j.chat-memory.message-window.max-messages=20
+*index.html structure:*
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>SmartShip Logistics Assistant</title>
+    <script src="https://cdn.jsdelivr.net/npm/wc-chatbot"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>SmartShip Logistics AI Assistant</header>
+    <main>
+        <chat-bot></chat-bot>
+        <aside><!-- Example queries panel --></aside>
+    </main>
+    <script type="module" src="chat.js"></script>
+</body>
+</html>
 ```
 
-**Kubernetes Resources (Ollama):**
-| Component | CPU Req | CPU Limit | Mem Req | Mem Limit | Storage |
-|-----------|---------|-----------|---------|-----------|---------|
-| Ollama | 2000m | 4000m | 4Gi | 8Gi | 20Gi |
+*Example Query Suggestions:*
+- "How many shipments are in transit?"
+- "Which shipments are delayed?"
+- "Show customer CUST-0001 overview"
+- "What's the status of vehicle VEH-001?"
+- "List all warehouses"
+- "Show delivery performance for WH-RTM"
 
-**Minikube Requirements Update:**
-```bash
-minikube start --cpus=6 --memory=16384 --disk-size=80g
-```
+**Building on Phase 6:**
+- Leverages existing LangChain4j integration
+- Uses existing KafkaStreamsQueryService for real-time data
+- Uses existing PostgresQueryService for reference data
+- Extends LogisticsAssistant with additional tools
 
-**Building on Phase 4:**
-- Leverages existing KafkaStreamsQueryService for real-time data
-- Uses existing PostgreSQL connection for reference data
-- Extends query-api module with AI capabilities
-
-### Phase 8: Advanced LLM Features & Demo Polish ⏭️ PENDING
+### Phase 8: Guardrails, Streaming & Observability ⏭️ PENDING
 **Status:** Pending
-**Goal:** Production-quality chatbot with output validation, analytics, and observability
+**Goal:** Production-quality chatbot with guardrails, streaming responses, and observability
 
 **Scope:**
+
+**Input Guardrails:**
+- **LogisticsInScopeGuard:** Validate questions are logistics-related before processing
 
 **Output Guardrails:**
 - **DataFactualityGuard:** Validate warehouse IDs are real (WH-RTM, WH-FRA, WH-BCN, WH-WAW, WH-STO)
 - **ResponseFormatGuard:** Block stack traces, prevent system prompt leakage
+
+**Streaming Responses:**
+- **SSE Streaming:** `POST /api/chat/stream` endpoint for progressive responses
+- **WebSocket:** `/ws/chat` for bidirectional streaming (optional)
 
 **Analytics Tools:**
 - `analyzeWarehouseIssues(warehouseId)` - Cross-source correlation
@@ -1008,11 +1009,21 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 - ChatAuditObserver implementing `AuditEventListener`
 - Log guardrail executions, tool calls, LLM requests/responses
 
+**Dependencies to Add (for streaming):**
+```xml
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-websockets-next</artifactId>
+</dependency>
+```
+
 **Files to Create:**
 | File | Description |
 |------|-------------|
+| `api/ai/guardrails/LogisticsInScopeGuard.java` | Input guardrail for question validation |
 | `api/ai/guardrails/DataFactualityGuard.java` | Output guardrail for data validation |
 | `api/ai/guardrails/ResponseFormatGuard.java` | Output guardrail for format validation |
+| `api/ai/WebSocketChatEndpoint.java` | WebSocket endpoint for streaming |
 | `api/ai/tools/AnalyticsTools.java` | Cross-source analytics tools |
 | `api/ai/observability/ChatAuditObserver.java` | Audit logging observer |
 | `docs/demo-conversations.md` | Example conversation flows |
@@ -1025,8 +1036,9 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 5. **Fleet Overview:** "Give me a summary of our current fleet utilization"
 
 **Building on Phase 7:**
-- Adds output validation to existing AI service
-- Extends tool classes with analytics capabilities
+- Adds guardrails to existing AI service
+- Extends with streaming response capabilities
+- Adds analytics tools for cross-source queries
 - Adds audit logging for compliance and debugging
 
 ## Quarkus Benefits Summary
@@ -1093,21 +1105,31 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 13. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
 14. **kubernetes/infrastructure/init.sql** - PostgreSQL DDL (single source of truth for reference data)
 
-### Phase 7 (LLM Chatbot)
-15. **query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java** - AI service interface
-16. **query-api/src/main/java/com/smartship/api/ai/ChatResource.java** - Chat REST endpoints
-17. **query-api/src/main/java/com/smartship/api/ai/WebSocketChatEndpoint.java** - WebSocket streaming
-18. **query-api/src/main/java/com/smartship/api/ai/tools/*.java** - 6 tool classes for LLM function calling
-19. **query-api/src/main/java/com/smartship/api/ai/guardrails/LogisticsInScopeGuard.java** - Input guardrail
-20. **query-api/src/main/java/com/smartship/api/ai/memory/InMemoryChatMemoryStore.java** - Session memory
-21. **kubernetes/infrastructure/ollama.yaml** - Ollama StatefulSet + Service
+### Phase 6 (LLM Chatbot - COMPLETED)
+15. **query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java** - AI service interface ✅
+16. **query-api/src/main/java/com/smartship/api/ai/ChatResource.java** - Chat REST endpoints ✅
+17. **query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java** - Shipment query tools ✅
+18. **query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java** - Customer query tools ✅
+19. **query-api/src/main/java/com/smartship/api/ai/tools/WarehouseTools.java** - Warehouse query tools ✅
+20. **query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java** - Session memory ✅
+21. **kubernetes/infrastructure/ollama.yaml** - Ollama StatefulSet + Service ✅
 
-### Phase 8 (Advanced LLM Features)
-22. **query-api/src/main/java/com/smartship/api/ai/guardrails/DataFactualityGuard.java** - Output guardrail
-23. **query-api/src/main/java/com/smartship/api/ai/guardrails/ResponseFormatGuard.java** - Format guardrail
-24. **query-api/src/main/java/com/smartship/api/ai/tools/AnalyticsTools.java** - Cross-source analytics
-25. **query-api/src/main/java/com/smartship/api/ai/observability/ChatAuditObserver.java** - Audit logging
-26. **docs/demo-conversations.md** - Demo conversation examples
+### Phase 7 (Additional Tools & Web UI)
+22. **query-api/src/main/java/com/smartship/api/ai/tools/VehicleTools.java** - Vehicle query tools
+23. **query-api/src/main/java/com/smartship/api/ai/tools/PerformanceTools.java** - Performance query tools
+24. **query-api/src/main/java/com/smartship/api/ai/tools/ReferenceDataTools.java** - Reference data tools
+25. **query-api/src/main/resources/META-INF/resources/index.html** - Chat web UI
+26. **query-api/src/main/resources/META-INF/resources/chat.js** - Chat UI JavaScript
+27. **query-api/src/main/resources/META-INF/resources/styles.css** - Chat UI styling
+
+### Phase 8 (Guardrails, Streaming & Observability)
+28. **query-api/src/main/java/com/smartship/api/ai/guardrails/LogisticsInScopeGuard.java** - Input guardrail
+29. **query-api/src/main/java/com/smartship/api/ai/guardrails/DataFactualityGuard.java** - Output guardrail
+30. **query-api/src/main/java/com/smartship/api/ai/guardrails/ResponseFormatGuard.java** - Format guardrail
+31. **query-api/src/main/java/com/smartship/api/ai/WebSocketChatEndpoint.java** - WebSocket streaming
+32. **query-api/src/main/java/com/smartship/api/ai/tools/AnalyticsTools.java** - Cross-source analytics
+33. **query-api/src/main/java/com/smartship/api/ai/observability/ChatAuditObserver.java** - Audit logging
+34. **docs/demo-conversations.md** - Demo conversation examples
 
 ## Next Steps
 
@@ -1116,6 +1138,7 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 ✅ **Phase 3 COMPLETED** - All 6 Kafka Streams state stores consuming 3 topics.
 ✅ **Phase 4 COMPLETED** - Full LLM query capability with 9 state stores, PostgreSQL integration, and hybrid queries.
 ✅ **Phase 5 COMPLETED** - Native image builds, comprehensive testing, and production hardening.
+✅ **Phase 6 COMPLETED** - LLM chatbot with LangChain4j, Ollama, and multi-provider support.
 
 **To deploy (JVM mode):**
 ```bash
@@ -1144,9 +1167,8 @@ python3 scripts/02-build-all.py --native
 ```
 
 **Future Implementation:**
-- Phase 6 will add demo optimization and Grafana dashboards
-- Phase 7 will add LLM chatbot integration with Quarkus LangChain4j and Ollama
-- Phase 8 will add advanced LLM features: output guardrails, analytics tools, and observability
+- Phase 7 will add additional LLM tool classes (VehicleTools, PerformanceTools, ReferenceDataTools) and web UI for demos
+- Phase 8 will add guardrails, WebSocket streaming, analytics tools, and observability
 
 ## Phase 1 Success Metrics (All Achieved)
 

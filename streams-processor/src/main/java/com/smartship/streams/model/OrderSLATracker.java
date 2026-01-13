@@ -1,8 +1,13 @@
 package com.smartship.streams.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.smartship.logistics.events.OrderStatus;
 import com.smartship.logistics.events.OrderStatusType;
+
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 /**
  * State store value for tracking orders at risk of SLA breach.
@@ -18,8 +23,21 @@ public record OrderSLATracker(
     @JsonProperty("is_at_risk") boolean isAtRisk,
     @JsonProperty("is_breached") boolean isBreached,
     @JsonProperty("shipment_count") int shipmentCount,
-    @JsonProperty("last_updated") long lastUpdated
+    @JsonIgnore long lastUpdated
 ) {
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_INSTANT;
+
+    /**
+     * Returns the last updated timestamp in ISO 8601 format.
+     */
+    @JsonProperty("last_updated")
+    public String lastUpdatedIso() {
+        if (lastUpdated == 0) {
+            return null;
+        }
+        return Instant.ofEpochMilli(lastUpdated).atOffset(ZoneOffset.UTC).format(ISO_FORMATTER);
+    }
+
     // SLA risk threshold: 60 minutes before deadline
     public static final long SLA_RISK_THRESHOLD_MINUTES = 60;
 

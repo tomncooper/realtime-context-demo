@@ -2,7 +2,10 @@ package com.smartship.api.ai;
 
 import com.smartship.api.ai.memory.SessionChatMemoryProvider;
 import com.smartship.api.ai.tools.CustomerTools;
+import com.smartship.api.ai.tools.PerformanceTools;
+import com.smartship.api.ai.tools.ReferenceDataTools;
 import com.smartship.api.ai.tools.ShipmentTools;
+import com.smartship.api.ai.tools.VehicleTools;
 import com.smartship.api.ai.tools.WarehouseTools;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
@@ -16,10 +19,16 @@ import io.quarkiverse.langchain4j.RegisterAiService;
  * answer questions about shipments, customers, vehicles, and warehouse operations
  * using real-time data from Kafka Streams and reference data from PostgreSQL.</p>
  *
- * <p>Phase 6: Implementation with ShipmentTools, CustomerTools, and WarehouseTools.</p>
  */
 @RegisterAiService(
-    tools = {ShipmentTools.class, CustomerTools.class, WarehouseTools.class},
+    tools = {
+        ShipmentTools.class,
+        CustomerTools.class,
+        WarehouseTools.class,
+        VehicleTools.class,
+        PerformanceTools.class,
+        ReferenceDataTools.class
+    },
     chatMemoryProviderSupplier = SessionChatMemoryProvider.class
 )
 public interface LogisticsAssistant {
@@ -38,6 +47,9 @@ public interface LogisticsAssistant {
         - **Shipments**: Current status (CREATED, PICKED, PACKED, DISPATCHED, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, EXCEPTION, CANCELLED), delays, and customer shipment history
         - **Customers**: 200 enterprise customers with different SLA tiers (STANDARD, EXPRESS, SAME_DAY, CRITICAL)
         - **Warehouses**: 5 distribution centers across Europe with real-time operational metrics
+        - **Vehicles**: 50 vehicles with real-time GPS location, speed, fuel level, and load information
+        - **Performance**: Hourly delivery performance metrics and 15-minute operational metrics per warehouse
+        - **Reference Data**: Product catalog (10K products), driver roster (75 drivers), and delivery routes (100 routes)
 
         **Important ID formats** (use these exact formats when calling tools):
         - Customers: CUST-0001 through CUST-0200 (4 digits, zero-padded)
@@ -46,12 +58,12 @@ public interface LogisticsAssistant {
         - Drivers: DRV-001 through DRV-075 (3 digits)
 
         **Guidelines:**
-        1. Always use the available tools to fetch real-time data before answering questions about shipments, customers, warehouses, or operations.
+        1. Always use the available tools to fetch real-time data before answering questions about shipments, customers, warehouses, vehicles, or operations.
         2. Be concise and focus on actionable insights.
         3. When presenting numbers, format them clearly (e.g., "42 shipments" not just "42").
         4. If you don't have enough information or a tool returns no data, say so rather than guessing.
         5. If asked about something outside the logistics domain, politely explain that you can only help with logistics-related questions.
-        6. When a customer ID is mentioned without the CUST- prefix, assume it needs to be formatted (e.g., "customer 1" means CUST-0001).
+        6. When an ID is mentioned without the prefix, assume it needs to be formatted (e.g., "customer 1" means CUST-0001, "vehicle 5" means VEH-005).
 
         **Example questions you can answer:**
         - "How many shipments are currently in transit?"
@@ -61,6 +73,14 @@ public interface LogisticsAssistant {
         - "Give me an overview of customer CUST-0001"
         - "What warehouses do we have?"
         - "What is the status of the Rotterdam warehouse?"
+        - "What's the status of vehicle VEH-001?"
+        - "Show fleet utilization"
+        - "Which vehicles are at the Frankfurt warehouse?"
+        - "Show delivery performance for WH-RTM"
+        - "Get warehouse metrics for Barcelona"
+        - "Find available drivers"
+        - "Search for Electronics products"
+        - "Show routes from Rotterdam"
         """)
     String chat(@MemoryId String sessionId, @UserMessage String userMessage);
 }

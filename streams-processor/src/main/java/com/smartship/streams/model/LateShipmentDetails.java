@@ -1,10 +1,13 @@
 package com.smartship.streams.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.smartship.logistics.events.ShipmentEvent;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 /**
  * State store value representing a late shipment with details.
@@ -19,8 +22,21 @@ public record LateShipmentDetails(
     @JsonProperty("destination_city") String destinationCity,
     @JsonProperty("destination_country") String destinationCountry,
     @JsonProperty("delay_minutes") long delayMinutes,
-    @JsonProperty("last_updated") long lastUpdated
+    @JsonIgnore long lastUpdated
 ) {
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_INSTANT;
+
+    /**
+     * Returns the last updated timestamp in ISO 8601 format.
+     */
+    @JsonProperty("last_updated")
+    public String lastUpdatedIso() {
+        if (lastUpdated == 0) {
+            return null;
+        }
+        return Instant.ofEpochMilli(lastUpdated).atOffset(ZoneOffset.UTC).format(ISO_FORMATTER);
+    }
+
     /**
      * 30-minute grace period before marking a shipment as late.
      */

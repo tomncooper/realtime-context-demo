@@ -289,7 +289,7 @@ The following diagram illustrates the complete flow when a client requests shipm
 ![Query Flow Diagram](assets/imgs/query-flow.png)
 
 The key insight here is that because the state store is partitioned by key across instances, no single instance has the complete picture.
-The Query API must aggregate results from all instances to provide an accurate answer.
+The Query API has to aggregate results from all the Kafka Streams instances in order to provide an accurate answer.
 For queries that target a specific key (e.g., "What is the count for IN_TRANSIT?"), the Query API can use the metadata endpoint to route the request directly to the instance holding that key's partition.
 
 ### Other queries
@@ -375,3 +375,336 @@ The Query API exposes hybrid queries through endpoints like:
 - `GET /api/hybrid/warehouses/{id}/status` - Warehouse details with real-time operational metrics
 - `GET /api/hybrid/orders/{id}/details` - Order information with customer and shipment context
 
+## AI Agent Integration
+
+Now that we have an API for querying the real-time state of SmartShip's operations, we can integrate this with an AI agent to answer natural language questions about the state of the business.
+
+To achieve this, we need to connect a large language model (LLM) to our Query API so it can fetch the relevant data on demand.
+For this we need a way to ingest and issue queries to the LLM, provide standard system prompts and allow the LLM to invoke specific functions or tools that correspond to our API endpoints.
+
+### Using LangChain4j with Quarkus
+
+There are many ways to connect an LLM to external data sources and APIs. For this demonstration, we use [LangChain4j](https://docs.langchain4j.dev/), a Java library that provides a unified interface for working with large language models. 
+Quarkus has excellent support for LangChain4j through the [Quarkiverse LangChain4j extension](https://docs.quarkiverse.io/quarkus-langchain4j/dev/index.html), which provides CDI integration and simplified configuration.
+
+### Tool/Function Calling
+
+The key mechanism that allows an LLM to query our real-time data is **tool calling** (also known as [function calling](https://quarkus.io/quarkus-workshop-langchain4j/section-1/step-07/#function-calling)). 
+Instead of trying to embed all the data into the context, we define a set of tools that the LLM can invoke to fetch specific information on demand.
+
+When a user asks a question like "How many shipments are currently in transit?", the LLM:
+
+1. Analyzes the question and determines it needs shipment status data
+2. Invokes the appropriate tool (e.g., `getShipmentStatusCounts`)
+3. Receives the JSON response from the tool
+4. Synthesizes a natural language answer based on the data
+
+This approach has several advantages:
+
+- The LLM only fetches data it actually needs
+- Responses include the most current data from our state stores
+- Complex queries can involve multiple tool calls
+- The context window isn't consumed by unnecessary data
+
+### Defining the AI Service Interface
+
+LangChain4j uses an interface-based approach where you define a service contract and the framework generates the implementation. 
+In our project, the `LogisticsAssistant` interface (see `query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java`) serves as the entry point:
+
+```java
+@RegisterAiService(
+    tools = {
+        ShipmentTools.class,
+        CustomerTools.class,
+        WarehouseTools.class,
+        VehicleTools.class,
+        PerformanceTools.class,
+        ReferenceDataTools.class
+    },
+    chatMemoryProviderSupplier = SessionChatMemoryProvider.class
+)
+public interface LogisticsAssistant {
+
+    @SystemMessage("""
+        You are SmartShip's Logistics Assistant for a European logistics company.
+
+        You have access to real-time operational data through various tools...
+
+        Always use the available tools to fetch current data before answering.
+        Be concise and format numbers clearly.
+        """)
+    String chat(@MemoryId String sessionId, @UserMessage String userMessage);
+}
+```
+
+The `@RegisterAiService` annotation tells LangChain4j to:
+
+- Create a runtime implementation of this interface
+- Register the specified tool classes for function calling
+- Use the `SessionChatMemoryProvider` to maintain conversation history per session
+
+The `@SystemMessage` provides context to the LLM about its role and capabilities.
+
+### Implementing Tools
+
+Each tool class contains methods, annotated with `@Tool`, that the LLM can invoke. 
+Here's an example from `ShipmentTools` (see `query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java`):
+
+```java
+@ApplicationScoped
+public class ShipmentTools {
+
+    @Inject
+    KafkaStreamsQueryService streamsQueryService;
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    @Tool("Get the current count of shipments in each status. " +
+          "Returns counts for CREATED, PICKED, PACKED, DISPATCHED, IN_TRANSIT, " +
+          "OUT_FOR_DELIVERY, DELIVERED, EXCEPTION, and CANCELLED statuses.")
+    public String getShipmentStatusCounts() {
+        LOG.debug("Tool called: getShipmentStatusCounts");
+
+        try {
+            Map<String, Long> statusCounts = streamsQueryService.getAllStatusCounts();
+
+            if (statusCounts == null || statusCounts.isEmpty()) {
+                return "{\"message\": \"No shipment status data available\"}";
+            }
+
+            long total = statusCounts.values().stream()
+                .mapToLong(Long::longValue).sum();
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("status_counts", statusCounts);
+            result.put("total_shipments", total);
+
+            return objectMapper.writeValueAsString(result);
+
+        } catch (Exception e) {
+            LOG.errorf(e, "Error getting shipment status counts");
+            return "{\"error\": \"Failed to retrieve shipment status counts\"}";
+        }
+    }
+
+    @Tool("Get shipment statistics for a specific customer. " +
+          "Customer IDs should be in format CUST-XXXX (e.g., CUST-0001).")
+    public String getCustomerShipmentStats(String customerId) {
+        // Normalize ID format (e.g., "1" -> "CUST-0001")
+        String normalizedId = normalizeCustomerId(customerId);
+
+        try {
+            CustomerShipmentStats stats =
+                streamsQueryService.getCustomerShipmentStats(normalizedId);
+
+            if (stats == null) {
+                return "{\"message\": \"No shipment data found for " + normalizedId + "\"}";
+            }
+
+            return objectMapper.writeValueAsString(stats);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Failed to retrieve stats: " + e.getMessage() + "\"}";
+        }
+    }
+}
+```
+
+Key patterns in our tool implementations:
+
+1. **Return JSON strings**: Tools return JSON that the LLM can parse and understand
+2. **Descriptive annotations**: The `@Tool` description helps the LLM decide when to use each tool
+3. **ID normalization**: Handle flexible input formats from users
+4. **Error handling**: Return error JSON instead of throwing exceptions
+5. **Inject services**: Tools call the existing query services to fetch data
+
+### Tool Categories
+
+We organized tools into six categories matching our data domains:
+
+| Tool Class         | Methods | Data Source                | Purpose                                         |
+|--------------------|---------|----------------------------|-------------------------------------------------|
+| ShipmentTools      | 3       | Kafka Streams              | Shipment counts, late shipments, customer stats |
+| CustomerTools      | 2       | PostgreSQL + Hybrid        | Customer search, overview with real-time stats  |
+| WarehouseTools     | 2       | PostgreSQL + Hybrid        | Warehouse list, operational status              |
+| VehicleTools       | 4       | Kafka Streams + PostgreSQL | Vehicle status, fleet overview, utilization     |
+| PerformanceTools   | 3       | Kafka Streams              | Warehouse metrics, delivery performance         |
+| ReferenceDataTools | 4       | PostgreSQL                 | Products, drivers, routes                       |
+
+Tools that call `QueryOrchestrationService` perform hybrid queries, combining PostgreSQL reference data with Kafka Streams real-time state.
+
+### Session Memory
+
+To support multi-message conversations, we implement a `ChatMemoryProvider` (see `query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java`) that maintains conversation history per session:
+
+```java
+@Singleton
+public class SessionChatMemoryProvider implements Supplier<ChatMemoryProvider> {
+
+    private static final int MAX_MESSAGES = 20;
+    private final Map<Object, ChatMemory> memories = new ConcurrentHashMap<>();
+
+    @Override
+    public ChatMemoryProvider get() {
+        return memoryId -> memories.computeIfAbsent(memoryId, id ->
+            MessageWindowChatMemory.builder()
+                .id(id)
+                .maxMessages(MAX_MESSAGES)
+                .build()
+        );
+    }
+
+    public void clearSession(Object sessionId) {
+        memories.remove(sessionId);
+    }
+}
+```
+
+This implementation stores conversation history in memory with a 20-message window per session. For a production system, you would likely use a persistent store like Redis.
+
+### REST API
+
+The chat endpoint in `ChatResource` exposes the AI assistant via HTTP:
+
+```java
+@Path("/api/chat")
+public class ChatResource {
+
+    @Inject
+    LogisticsAssistant assistant;
+
+    @POST
+    public Response chat(ChatRequest request) {
+        String sessionId = request.getSessionId();
+        if (sessionId == null || sessionId.isBlank()) {
+            sessionId = UUID.randomUUID().toString();
+        }
+
+        try {
+            String response = assistant.chat(sessionId, request.getMessage());
+
+            return Response.ok(
+                ChatResponse.of(response, sessionId)
+                    .withSources(List.of("kafka-streams", "postgresql"))
+            ).build();
+
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity(ChatResponse.of("I encountered an error...", sessionId))
+                .build();
+        }
+    }
+}
+```
+
+### LLM Provider Configuration
+
+The system supports multiple LLM providers, configured via `application.properties`:
+
+```properties
+# Provider selection (ollama, openai, or anthropic)
+quarkus.langchain4j.chat-model.provider=${LLM_PROVIDER:ollama}
+
+# Ollama (default - local/Kubernetes)
+quarkus.langchain4j.ollama.base-url=${OLLAMA_BASE_URL:http://ollama.smartship.svc.cluster.local:11434}
+quarkus.langchain4j.ollama.chat-model.model-id=llama3.2
+quarkus.langchain4j.ollama.chat-model.temperature=0.3
+
+# OpenAI (optional)
+quarkus.langchain4j.openai.api-key=${OPENAI_API_KEY:not-configured}
+quarkus.langchain4j.openai.chat-model.model-name=gpt-4o-mini
+
+# Anthropic (optional)
+quarkus.langchain4j.anthropic.api-key=${ANTHROPIC_API_KEY:not-configured}
+quarkus.langchain4j.anthropic.chat-model.model-name=claude-3-haiku-20240307
+```
+
+By default, the system uses Ollama running locally in the Kubernetes cluster. 
+This keeps everything self-contained for demonstration purposes. 
+For production, you might prefer a more powerful frontier model.
+
+
+### Example Conversation
+
+Here's an example of how the system handles a multi-turn conversation:
+
+**User**: "How many shipments are currently in transit?"
+
+The LLM invokes `ShipmentTools.getShipmentStatusCounts()` which queries the `active-shipments-by-status` state store and returns:
+
+```json
+{
+  "status_counts": {
+    "CREATED": 45,
+    "PICKED": 32,
+    "PACKED": 28,
+    "DISPATCHED": 67,
+    "IN_TRANSIT": 127,
+    "OUT_FOR_DELIVERY": 43,
+    "DELIVERED": 1523,
+    "EXCEPTION": 8,
+    "CANCELLED": 12
+  },
+  "total_shipments": 1885
+}
+```
+
+**Assistant**: "There are currently 127 shipments in transit. Looking at the overall picture, you have 1,885 total shipments tracked in the system, with 1,523 already delivered and 8 exceptions that may need attention."
+
+**User**: "Which shipments are delayed?"
+
+The LLM invokes `ShipmentTools.getLateShipments()` which queries the `late-shipments` state store:
+
+```json
+{
+  "count": 8,
+  "late_shipments": [
+    {
+      "shipment_id": "SHIP-00234",
+      "customer_id": "CUST-0042",
+      "expected_delivery": "2024-01-12T14:00:00Z",
+      "hours_overdue": 4.5
+    },
+    ...
+  ]
+}
+```
+
+**Assistant**: "There are 8 shipments currently delayed. The most overdue is SHIP-00234 for customer CUST-0042, which is 4.5 hours past its expected delivery time..."
+
+**User**: "Tell me more about that customer"
+
+Using the session context (the LLM remembers CUST-0042 from the previous response), it invokes `CustomerTools.getCustomerOverview("CUST-0042")`:
+
+**Assistant**: "Customer CUST-0042 is Müller GmbH, a Premium tier customer based in Munich. They have a 94.2% on-time delivery rate across 156 total shipments. Currently they have 12 shipments in transit and 3 pending orders..."
+
+### Architecture Overview
+
+The diagram below shows the full architecture and how natural language queries flow through the system:
+
+![AI Agent Architecture](assets/imgs/ai-agent-architecture.png)
+
+This system allows users to ask complex questions about the real-time state of SmartShip's operations in natural language.
+Crucially, the LLM is able to provide accurate, up-to-date answers by invoking tools that query the live Kafka Streams state stores and PostgreSQL reference data.
+The LLM doesn't need to know the details of how data is stored or queried. 
+It simply invokes tools with descriptive names, receives JSON responses, and uses that data to formulate answers.
+
+### Limitations and Considerations
+
+This implementation is a demonstration of what's possible, not a production-ready solution. Key limitations include:
+
+- **In-memory session storage**: Conversation history is lost on restart
+- **No rate limiting**: Production systems need throttling
+- **Basic error handling**: More sophisticated retry logic would be needed
+- **Single model configuration**: No automatic fallback between providers
+- **No streaming responses**: Responses arrive all at once
+
+For a production deployment, you would also want to consider:
+
+- Guardrails to prevent prompt injection and ensure appropriate responses
+- Observability and logging of LLM interactions for debugging and improvement
+- Caching of expensive queries to reduce latency
+- Fine-tuning or RAG for domain-specific knowledge beyond what tools provide
+
+Despite these limitations, this implementation demonstrates the core concept: connecting an LLM to real-time streaming data through tool calling, enabling natural language queries against the current state of your business operations.

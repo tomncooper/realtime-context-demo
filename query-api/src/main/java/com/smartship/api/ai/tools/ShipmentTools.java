@@ -55,11 +55,13 @@ public class ShipmentTools {
         }
     }
 
+    private static final int MAX_LATE_SHIPMENTS_TO_RETURN = 10;
+
     /**
-     * Get all shipments that are currently late (past their expected delivery time).
-     * Returns details about each late shipment including customer, SLA, and delay information.
+     * Get shipments that are currently late (past their expected delivery time).
+     * Returns a summary and the top late shipments to keep the response size manageable.
      */
-    @Tool("Get all shipments that are currently late (past their expected delivery time). Returns a list of late shipments with customer ID, expected delivery, current status, and delay duration.")
+    @Tool("Get shipments that are currently late (delayed past expected delivery). Returns total count and details of the top 10 most delayed shipments.")
     public String getLateShipments() {
         LOG.info("Tool called: getLateShipments");
         try {
@@ -69,10 +71,25 @@ public class ShipmentTools {
                 return "{\"message\": \"No late shipments found. All shipments are on track.\", \"count\": 0}";
             }
 
-            return toJson(Map.of(
-                "count", lateShipments.size(),
-                "late_shipments", lateShipments
-            ));
+            int totalCount = lateShipments.size();
+
+            // Return only the first N shipments to avoid overwhelming the LLM
+            List<Map<String, Object>> topLateShipments = lateShipments.stream()
+                .limit(MAX_LATE_SHIPMENTS_TO_RETURN)
+                .toList();
+
+            Map<String, Object> response = new java.util.LinkedHashMap<>();
+            response.put("total_late_shipments", totalCount);
+            response.put("showing", Math.min(MAX_LATE_SHIPMENTS_TO_RETURN, totalCount));
+            response.put("summary", String.format("There are %d shipments currently delayed.", totalCount));
+            response.put("late_shipments", topLateShipments);
+
+            if (totalCount > MAX_LATE_SHIPMENTS_TO_RETURN) {
+                response.put("note", String.format("Showing top %d of %d late shipments. Use the API directly for full list.",
+                    MAX_LATE_SHIPMENTS_TO_RETURN, totalCount));
+            }
+
+            return toJson(response);
         } catch (Exception e) {
             LOG.errorf(e, "Error getting late shipments");
             return "{\"error\": \"Failed to retrieve late shipments: " + e.getMessage() + "\"}";

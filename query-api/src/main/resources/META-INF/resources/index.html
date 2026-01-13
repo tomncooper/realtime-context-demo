@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartShip Logistics Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>SmartShip Logistics Dashboard</h1>
+            <p>Real-time logistics monitoring and AI-powered insights</p>
+        </header>
+
+        <main class="dashboard-grid">
+            <!-- AI Chat Card - Prominent, spans 2 columns -->
+            <section class="card chat-card">
+                <div class="card-header">
+                    <h2>AI Assistant</h2>
+                    <div class="llm-status">
+                        <span id="llm-status-indicator" class="status-indicator status-unknown"></span>
+                        <span id="llm-status-text" class="status-text">AI: Checking...</span>
+                        <button id="llm-check-btn" class="llm-check-btn" title="Check LLM status">Check</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="chat-messages" class="chat-messages">
+                        <div class="chat-message assistant">
+                            Ask me about shipments, vehicles, warehouses, orders, or performance metrics.
+                        </div>
+                    </div>
+                    <div class="chat-suggestions">
+                        <button class="suggestion-chip" data-query="How many shipments are in transit?">Shipments in transit?</button>
+                        <button class="suggestion-chip" data-query="Which shipments are delayed?">Delayed shipments?</button>
+                        <button class="suggestion-chip" data-query="Show fleet utilization">Fleet status</button>
+                        <button class="suggestion-chip" data-query="Show warehouse metrics">Warehouse metrics</button>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chat-input" class="chat-input" placeholder="Ask a question..." />
+                        <button id="chat-send" class="chat-send-btn">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Shipments Card -->
+            <section class="card stat-card" id="shipments-card">
+                <div class="card-header">
+                    <h2>Shipments</h2>
+                </div>
+                <div class="card-body">
+                    <div class="stat-grid" id="shipment-stats">
+                        <div class="stat-item">
+                            <span class="stat-value" id="shipments-in-transit">--</span>
+                            <span class="stat-label">In Transit</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="shipments-delivered">--</span>
+                            <span class="stat-label">Delivered</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="shipments-created">--</span>
+                            <span class="stat-label">Created</span>
+                        </div>
+                        <div class="stat-item alert">
+                            <span class="stat-value" id="shipments-late">--</span>
+                            <span class="stat-label">Late</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Vehicles Card -->
+            <section class="card stat-card" id="vehicles-card">
+                <div class="card-header">
+                    <h2>Vehicle Fleet</h2>
+                </div>
+                <div class="card-body">
+                    <div class="stat-grid" id="vehicle-stats">
+                        <div class="stat-item success">
+                            <span class="stat-value" id="vehicles-active">--</span>
+                            <span class="stat-label">Active</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="vehicles-idle">--</span>
+                            <span class="stat-label">Idle</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="vehicles-maintenance">--</span>
+                            <span class="stat-label">Maintenance</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="vehicles-avg-load">--%</span>
+                            <span class="stat-label">Avg Load</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Warehouses Card -->
+            <section class="card stat-card" id="warehouses-card">
+                <div class="card-header">
+                    <h2>Warehouses</h2>
+                </div>
+                <div class="card-body">
+                    <div class="warehouse-list" id="warehouse-stats">
+                        <div class="warehouse-item">
+                            <span class="warehouse-name">Loading...</span>
+                            <span class="warehouse-ops">--</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Orders Card -->
+            <section class="card stat-card" id="orders-card">
+                <div class="card-header">
+                    <h2>Orders</h2>
+                </div>
+                <div class="card-body">
+                    <div class="stat-grid" id="order-stats">
+                        <div class="stat-item">
+                            <span class="stat-value" id="orders-pending">--</span>
+                            <span class="stat-label">Pending</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="orders-confirmed">--</span>
+                            <span class="stat-label">Confirmed</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="orders-shipped">--</span>
+                            <span class="stat-label">Shipped</span>
+                        </div>
+                        <div class="stat-item alert">
+                            <span class="stat-value" id="orders-at-risk">--</span>
+                            <span class="stat-label">At Risk</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Alerts Card - Full Width -->
+            <section class="card alert-card" id="alerts-card">
+                <div class="card-header">
+                    <h2>Alerts</h2>
+                </div>
+                <div class="card-body">
+                    <div id="alerts-list" class="alerts-list">
+                        <div class="alert-item">Loading alerts...</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <span id="last-updated">Last updated: --:--:--</span>
+            <button id="refresh-btn" class="refresh-btn">Refresh</button>
+            <span class="footer-info">Powered by Quarkus + LangChain4j + Kafka Streams</span>
+        </footer>
+    </div>
+
+    <script src="dashboard.js"></script>
+    <script src="chat.js"></script>
+</body>
+</html>

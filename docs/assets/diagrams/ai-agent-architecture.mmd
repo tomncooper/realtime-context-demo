@@ -1,0 +1,60 @@
+flowchart TB
+    subgraph User["User"]
+        Query["'How many shipments are in transit?'"]
+    end
+
+    subgraph API["Query API (Quarkus)"]
+        Chat["ChatResource<br/>POST /api/chat"]
+        Assistant["LogisticsAssistant<br/>@RegisterAiService"]
+        Memory["Session Memory<br/>(20 messages)"]
+    end
+
+    subgraph LLM["LLM Provider"]
+        Model["Ollama / OpenAI / Anthropic"]
+    end
+
+    subgraph Tools["Tool Classes"]
+        ST["ShipmentTools"]
+        CT["CustomerTools"]
+        VT["VehicleTools"]
+        WT["WarehouseTools"]
+        PT["PerformanceTools"]
+        RT["ReferenceDataTools"]
+    end
+
+    subgraph Services["Query Services"]
+        KS["KafkaStreamsQueryService"]
+        PS["PostgresQueryService"]
+        QO["QueryOrchestrationService"]
+    end
+
+    subgraph Data["Data Stores"]
+        Kafka["Kafka Streams<br/>State Stores"]
+        PG["PostgreSQL<br/>Reference Data"]
+    end
+
+    Query --> Chat
+    Chat --> Assistant
+    Assistant <--> Memory
+    Assistant <--> Model
+
+    Model <-.->|"tool calls"| ST
+    Model <-.->|"tool calls"| CT
+    Model <-.->|"tool calls"| VT
+    Model <-.->|"tool calls"| WT
+    Model <-.->|"tool calls"| PT
+    Model <-.->|"tool calls"| RT
+
+    ST --> KS
+    CT --> QO
+    VT --> KS
+    VT --> PS
+    WT --> QO
+    PT --> KS
+    RT --> PS
+
+    QO --> KS
+    QO --> PS
+
+    KS --> Kafka
+    PS --> PG

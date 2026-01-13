@@ -1,10 +1,19 @@
 package com.smartship.api.ai;
 
 import com.smartship.api.ai.memory.SessionChatMemoryProvider;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
+import jakarta.json.JsonArray;
+import jakarta.json.JsonObject;
+import jakarta.json.JsonValue;
 import jakarta.ws.rs.*;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -13,8 +22,11 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * REST resource for the AI chat endpoint.
@@ -35,6 +47,31 @@ public class ChatResource {
 
     @Inject
     SessionChatMemoryProvider memoryProvider;
+
+    @ConfigProperty(name = "quarkus.langchain4j.ollama.base-url",
+                    defaultValue = "http://ollama.smartship.svc.cluster.local:11434")
+    String ollamaBaseUrl;
+
+    @ConfigProperty(name = "quarkus.langchain4j.chat-model.provider",
+                    defaultValue = "ollama")
+    String llmProvider;
+
+    private Client httpClient;
+
+    @PostConstruct
+    void init() {
+        this.httpClient = ClientBuilder.newBuilder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build();
+    }
+
+    @PreDestroy
+    void cleanup() {
+        if (httpClient != null) {
+            httpClient.close();
+        }
+    }
 
     /**
      * Send a message to the logistics assistant and receive a response.
@@ -150,19 +187,88 @@ public class ChatResource {
 
     /**
      * Health check endpoint for the chat service.
+     * Actually tests connectivity to the LLM provider.
      */
     @GET
     @Path("/health")
     @Operation(
         summary = "Chat service health check",
-        description = "Check if the chat service is available"
+        description = "Check if the chat service and LLM provider are available"
     )
     public Response healthCheck() {
-        return Response.ok(java.util.Map.of(
-            "status", "UP",
-            "service", "logistics-assistant",
-            "active_sessions", memoryProvider.getActiveSessionCount()
-        )).build();
+        long startTime = System.currentTimeMillis();
+
+        String status = "DOWN";
+        String llmStatus = "UNKNOWN";
+        String model = null;
+        String errorMessage = null;
+
+        try {
+            if ("ollama".equalsIgnoreCase(llmProvider)) {
+                // Check Ollama's /api/tags endpoint to verify connectivity and get models
+                String tagsUrl = UriBuilder.fromUri(ollamaBaseUrl)
+                    .path("api/tags")
+                    .build()
+                    .toString();
+
+                JsonObject response = httpClient.target(tagsUrl)
+                    .request(MediaType.APPLICATION_JSON)
+                    .get(JsonObject.class);
+
+                // Check if llama3.2 model is available
+                JsonArray models = response.getJsonArray("models");
+                if (models != null) {
+                    for (JsonValue modelValue : models) {
+                        JsonObject modelObj = modelValue.asJsonObject();
+                        String modelName = modelObj.getString("name", "");
+                        if (modelName.startsWith("llama3.2")) {
+                            model = modelName;
+                            llmStatus = "UP";
+                            status = "UP";
+                            break;
+                        }
+                    }
+                    if (model == null && !models.isEmpty()) {
+                        // Ollama is up but llama3.2 not found
+                        llmStatus = "DEGRADED";
+                        status = "DEGRADED";
+                        errorMessage = "Model llama3.2 not found, available models: " + models.size();
+                    }
+                }
+            } else {
+                // For OpenAI/Anthropic, we can't easily health check without making a real call
+                // Just report that we're configured for a cloud provider
+                llmStatus = "CONFIGURED";
+                status = "UP";
+                model = llmProvider;
+            }
+        } catch (Exception e) {
+            LOG.warnf("LLM health check failed: %s", e.getMessage());
+            llmStatus = "DOWN";
+            errorMessage = e.getMessage();
+        }
+
+        long responseTime = System.currentTimeMillis() - startTime;
+
+        Map<String, Object> healthResponse = new LinkedHashMap<>();
+        healthResponse.put("status", status);
+        healthResponse.put("service", "logistics-assistant");
+        healthResponse.put("llm_provider", llmProvider);
+        healthResponse.put("llm_status", llmStatus);
+        if (model != null) {
+            healthResponse.put("model", model);
+        }
+        if (errorMessage != null) {
+            healthResponse.put("error", errorMessage);
+        }
+        healthResponse.put("response_time_ms", responseTime);
+        healthResponse.put("active_sessions", memoryProvider.getActiveSessionCount());
+
+        Response.Status httpStatus = "UP".equals(status) ? Response.Status.OK :
+                                     "DEGRADED".equals(status) ? Response.Status.OK :
+                                     Response.Status.SERVICE_UNAVAILABLE;
+
+        return Response.status(httpStatus).entity(healthResponse).build();
     }
 
     private String truncate(String text, int maxLength) {

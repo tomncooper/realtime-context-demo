@@ -61,7 +61,10 @@ def deploy_ollama_with_models(models: list):
     kubectl('apply', '-f', 'kubernetes/infrastructure/ollama-hostpath.yaml')
 
     # Wait for Ollama to be ready
-    print("Waiting for Ollama StatefulSet to be ready...")
+    print(
+        "Waiting for Ollama StatefulSet to be ready, " +
+        "depending on the size of the model this may take some time..."
+    )
     wait_for_statefulset_ready('ollama', replicas=1, timeout=300)
 
     return True

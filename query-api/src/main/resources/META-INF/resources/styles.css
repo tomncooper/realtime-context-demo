@@ -1,0 +1,462 @@
+:root {
+    --primary-color: #1a365d;
+    --accent-color: #e53e3e;
+    --success-color: #38a169;
+    --warning-color: #d69e2e;
+    --bg-color: #f7fafc;
+    --text-color: #2d3748;
+    --text-light: #718096;
+    --border-color: #e2e8f0;
+    --card-bg: #ffffff;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1rem;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+.header {
+    text-align: center;
+    padding: 1.5rem;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.header h1 {
+    font-size: 1.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.header p {
+    opacity: 0.9;
+    font-size: 0.95rem;
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    flex: 1;
+}
+
+/* Cards */
+.card {
+    background: var(--card-bg);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.card-header {
+    background: var(--primary-color);
+    color: white;
+    padding: 0.75rem 1rem;
+}
+
+.card-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.card-body {
+    padding: 1rem;
+}
+
+/* Chat Card - Spans 2 columns */
+.chat-card {
+    grid-column: span 2;
+    grid-row: span 2;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-card .card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 0.75rem;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 300px;
+    min-height: 150px;
+    padding: 0.5rem;
+    background: #f8fafc;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+}
+
+.chat-message {
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    border-radius: 8px;
+    max-width: 90%;
+    line-height: 1.5;
+}
+
+.chat-message.assistant {
+    background: var(--primary-color);
+    color: white;
+    margin-right: auto;
+}
+
+.chat-message.user {
+    background: var(--border-color);
+    color: var(--text-color);
+    margin-left: auto;
+}
+
+.chat-message.loading {
+    opacity: 0.7;
+    font-style: italic;
+}
+
+.chat-message.error {
+    background: var(--accent-color);
+}
+
+.chat-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.suggestion-chip {
+    padding: 0.4rem 0.75rem;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-color);
+    transition: all 0.2s ease;
+}
+
+.suggestion-chip:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.chat-input-container {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.chat-input {
+    flex: 1;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.chat-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.chat-send-btn {
+    padding: 0.6rem 1rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s ease;
+}
+
+.chat-send-btn:hover {
+    background: #2c5282;
+}
+
+/* Stat Cards */
+.stat-card .card-body {
+    padding: 0.75rem;
+}
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+}
+
+.stat-item {
+    text-align: center;
+    padding: 0.75rem;
+    background: var(--bg-color);
+    border-radius: 6px;
+}
+
+.stat-item.alert .stat-value {
+    color: var(--accent-color);
+}
+
+.stat-item.success .stat-value {
+    color: var(--success-color);
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-top: 0.25rem;
+}
+
+/* Warehouse List */
+.warehouse-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.warehouse-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-color);
+    border-radius: 4px;
+}
+
+.warehouse-name {
+    font-weight: 500;
+}
+
+.warehouse-ops {
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
+/* Alert Card - Full Width */
+.alert-card {
+    grid-column: span 3;
+}
+
+.alerts-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.alert-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.alert-item.late-shipment {
+    background: #fed7d7;
+    color: #c53030;
+}
+
+.alert-item.sla-risk {
+    background: #fefcbf;
+    color: #975a16;
+}
+
+.alert-item.success {
+    background: #c6f6d5;
+    color: #276749;
+}
+
+.alert-icon {
+    font-size: 1rem;
+}
+
+/* Footer */
+.footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 1rem;
+    color: var(--text-light);
+    font-size: 0.85rem;
+    margin-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.refresh-btn {
+    padding: 0.4rem 0.75rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.2s ease;
+}
+
+.refresh-btn:hover {
+    background: #2c5282;
+}
+
+.footer-info {
+    margin-left: auto;
+}
+
+/* Responsive */
+@media (max-width: 1000px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .chat-card {
+        grid-column: span 2;
+    }
+
+    .alert-card {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 600px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .chat-card,
+    .alert-card {
+        grid-column: span 1;
+    }
+
+    .footer {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .footer-info {
+        margin-left: 0;
+    }
+}
+
+/* LLM Status Indicator */
+.llm-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s infinite;
+}
+
+.status-up {
+    background-color: var(--success-color);
+    box-shadow: 0 0 6px var(--success-color);
+}
+
+.status-down {
+    background-color: var(--accent-color);
+    box-shadow: 0 0 6px var(--accent-color);
+}
+
+.status-degraded {
+    background-color: var(--warning-color);
+    box-shadow: 0 0 6px var(--warning-color);
+}
+
+.status-unknown {
+    background-color: var(--text-light);
+    animation: pulse-unknown 1.5s infinite;
+}
+
+.status-text {
+    font-size: 0.75rem;
+    opacity: 0.9;
+}
+
+.llm-check-btn {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.llm-check-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Card header flex layout for status indicator */
+.chat-card .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Pulse animation for status indicators */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+@keyframes pulse-unknown {
+    0%, 100% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+/* Thinking message with timer styling */
+.chat-message.loading {
+    opacity: 0.8;
+    font-style: italic;
+    background: linear-gradient(90deg, var(--primary-color) 0%, #2c5282 100%);
+}
+
+/* Error message styling */
+.chat-message.error {
+    background-color: #fed7d7;
+    color: #c53030;
+}

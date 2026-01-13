@@ -142,6 +142,3 @@ coverage.xml
 # Backup files
 *.orig
 *.rej
-
-# Rendered Docs
-*.html

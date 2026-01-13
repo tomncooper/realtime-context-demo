@@ -3,6 +3,7 @@ package com.smartship.streams;
 import com.smartship.common.KafkaConfig;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +47,12 @@ public class StreamsApplication {
         // Create Streams instance
         final KafkaStreams streams = new KafkaStreams(topology, props);
         final CountDownLatch latch = new CountDownLatch(1);
+
+        // Set uncaught exception handler to replace failed thread instead of shutting down
+        streams.setUncaughtExceptionHandler(exception -> {
+            LOG.error("Uncaught exception in Kafka Streams thread. Replacing thread.", exception);
+            return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.REPLACE_THREAD;
+        });
 
         // Start Interactive Query Server
         final InteractiveQueryServer queryServer = new InteractiveQueryServer(streams);

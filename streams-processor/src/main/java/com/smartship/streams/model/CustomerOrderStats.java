@@ -1,8 +1,13 @@
 package com.smartship.streams.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.smartship.logistics.events.OrderStatus;
 import com.smartship.logistics.events.OrderStatusType;
+
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 /**
  * State store value representing aggregated order statistics per customer.
@@ -17,8 +22,21 @@ public record CustomerOrderStats(
     @JsonProperty("cancelled_orders") long cancelledOrders,
     @JsonProperty("returned_orders") long returnedOrders,
     @JsonProperty("at_risk_orders") long atRiskOrders,
-    @JsonProperty("last_updated") long lastUpdated
+    @JsonIgnore long lastUpdated
 ) {
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_INSTANT;
+
+    /**
+     * Returns the last updated timestamp in ISO 8601 format.
+     */
+    @JsonProperty("last_updated")
+    public String lastUpdatedIso() {
+        if (lastUpdated == 0) {
+            return null;
+        }
+        return Instant.ofEpochMilli(lastUpdated).atOffset(ZoneOffset.UTC).format(ISO_FORMATTER);
+    }
+
     /**
      * Create an empty stats record for a customer.
      */

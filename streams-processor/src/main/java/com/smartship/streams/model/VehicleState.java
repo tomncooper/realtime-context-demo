@@ -1,8 +1,12 @@
 package com.smartship.streams.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.smartship.logistics.events.VehicleTelemetry;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
@@ -21,8 +25,21 @@ public record VehicleState(
     @JsonProperty("current_load_items") int currentLoadItems,
     @JsonProperty("shipment_ids") List<String> shipmentIds,
     @JsonProperty("odometer_km") double odometerKm,
-    @JsonProperty("last_updated") long lastUpdated
+    @JsonIgnore long lastUpdated
 ) {
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_INSTANT;
+
+    /**
+     * Returns the last updated timestamp in ISO 8601 format.
+     */
+    @JsonProperty("last_updated")
+    public String lastUpdatedIso() {
+        if (lastUpdated == 0) {
+            return null;
+        }
+        return Instant.ofEpochMilli(lastUpdated).atOffset(ZoneOffset.UTC).format(ISO_FORMATTER);
+    }
+
     /**
      * Create a VehicleState from a VehicleTelemetry event.
      */

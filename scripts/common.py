@@ -53,43 +53,24 @@ def wait_for_statefulset_ready(name: str, replicas: int = 1,
                                namespace: str = NAMESPACE, timeout: int = 300) -> None:
     """Wait for StatefulSet pods to be ready.
 
-    StatefulSets don't have the same 'Available' condition as Deployments.
-    We need to wait for all pods to be ready using pod label selector.
+    Uses kubectl rollout status which waits quietly until the StatefulSet
+    is fully rolled out, rather than polling with repeated get commands.
 
     Args:
         name: Name of the StatefulSet
-        replicas: Expected number of replicas
+        replicas: Expected number of replicas (unused, kept for API compatibility)
         namespace: Kubernetes namespace
         timeout: Timeout in seconds
     """
-    import time
-
-    print(f"Waiting for StatefulSet {name} to have {replicas} ready pod(s)...")
-
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        try:
-            # Check StatefulSet status
-            result = run_command([
-                'kubectl', 'get', 'statefulset', name, '-n', namespace,
-                '-o', 'jsonpath={.status.readyReplicas}'
-            ], capture_output=True, check=False)
-
-            ready_replicas = result.stdout.strip() if result.stdout else '0'
-            ready_count = int(ready_replicas) if ready_replicas else 0
-
-            if ready_count >= replicas:
-                print(f"✓ StatefulSet {name} has {ready_count}/{replicas} pods ready")
-                return
-
-            print(f"  StatefulSet {name}: {ready_count}/{replicas} pods ready, waiting...")
-            time.sleep(5)
-
-        except Exception as e:
-            print(f"  Error checking StatefulSet status: {e}")
-            time.sleep(5)
-
-    raise TimeoutError(f"Timeout waiting for StatefulSet {name} to be ready")
+    print(f"Waiting for StatefulSet {name} to be ready...")
+    result = subprocess.run(
+        ['kubectl', 'rollout', 'status', f'statefulset/{name}',
+         '-n', namespace, f'--timeout={timeout}s'],
+        check=False
+    )
+    if result.returncode != 0:
+        raise TimeoutError(f"Timeout waiting for StatefulSet {name} to be ready")
+    print(f"✓ StatefulSet {name} is ready")
 
 
 def setup_container_runtime() -> str:
