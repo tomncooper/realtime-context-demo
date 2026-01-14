@@ -2,7 +2,7 @@
 
 A real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics company.
 
-For detailed architecture, implementation details, and query examples see the [documentation](docs/index.md).
+For detailed architecture, implementation details, and query examples see the [documentation](https://tomncooper.github.io/realtime-context-demo/).
 
 ## Prerequisites
 
