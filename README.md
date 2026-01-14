@@ -242,3 +242,51 @@ kubectl exec -it events-cluster-dual-role-0 -n smartship -- \
 kubectl port-forward svc/postgresql 5432:5432 -n smartship &
 psql -h localhost -U smartship -d smartship -c "SELECT * FROM warehouses;"
 ```
+
+## 📖 Documentation
+
+The project includes comprehensive documentation with architecture diagrams and implementation details.
+
+### Online Documentation
+The documentation is hosted on GitHub Pages (once deployed):
+- **Website**: https://tomncooper.github.io/realtime-context-demo/
+- **Source**: [docs/index.md](docs/index.md)
+
+### Building Documentation Locally
+
+The documentation can be built locally for preview or PDF generation.
+
+**Requirements:**
+- Python 3.9+
+- pandoc
+- weasyprint (`pip install weasyprint`)
+- mermaid-cli (`npm install -g @mermaid-js/mermaid-cli`)
+
+**Build Commands:**
+```bash
+# Build both HTML and PDF
+python scripts/build-docs.py
+
+# Build HTML only (faster, no mermaid-cli needed)
+python scripts/build-docs.py --html-only
+
+# Build PDF only
+python scripts/build-docs.py --pdf-only
+```
+
+**Preview locally:**
+```bash
+python -m http.server -d docs/_site 8000
+# Open http://localhost:8000
+```
+
+**Output:**
+- `docs/_site/index.html` - HTML with client-side Mermaid.js diagrams
+- `docs/_site/index.pdf` - PDF with pre-rendered PNG diagrams
+
+### GitHub Pages Deployment
+Documentation is automatically built and deployed via GitHub Actions when changes are pushed to the `main` branch. The workflow:
+1. Renders Mermaid diagrams to PNG (for PDF)
+2. Builds HTML with client-side Mermaid.js
+3. Generates downloadable PDF
+4. Deploys to GitHub Pages

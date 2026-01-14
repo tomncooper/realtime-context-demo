@@ -142,3 +142,6 @@ coverage.xml
 # Backup files
 *.orig
 *.rej
+
+# Documentation build output
+docs/_site/

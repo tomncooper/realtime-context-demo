@@ -1,7 +1,5 @@
 # Real-time Context Demo
 
-Source Code Repository: [https://github.com/tomncooper/realtime-context-demo](https://github.com/tomncooper/realtime-context-demo)
-
 ## Introduction
 
 Systems like [Apache Kafka](https://kafka.apache.org/) allow organisations to develop event driven architectures, which allow businesses to react to changes in real time. 
