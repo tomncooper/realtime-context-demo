@@ -176,6 +176,39 @@ Query-API
 - `query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java`
 - `kubernetes/infrastructure/ollama.yaml`
 
+### Web UI Dashboard
+The Query API includes a built-in web dashboard served as static files by Quarkus:
+
+```
+query-api/src/main/resources/META-INF/resources/
+├── index.html    - Main dashboard layout
+├── styles.css    - Dashboard styling (responsive grid)
+├── dashboard.js  - Live statistics and chart data fetching
+└── chat.js       - AI chat interface and LLM health monitoring
+```
+
+**Access URL:** `http://localhost:8080/` (after port-forwarding)
+
+**Dashboard Features:**
+- **AI Assistant** - Chat interface with quick-action buttons for common queries
+- **Shipments Card** - In Transit, Delivered, Created, Late counts
+- **Vehicle Fleet Card** - Active, Idle, Maintenance vehicles with average load
+- **Warehouses Card** - Operation counts per warehouse
+- **Orders Card** - Pending, Confirmed, Shipped, SLA at-risk counts
+- **Alerts Card** - Late shipments and SLA-at-risk orders with details
+- **LLM Health Status** - Real-time connection status to AI provider
+
+**Behavior:**
+- Auto-refresh every 30 seconds
+- Responsive layout (3 columns desktop, 2 tablet, 1 mobile)
+- Real-time data from Kafka Streams state stores and PostgreSQL
+
+**Local Development:**
+```bash
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+open http://localhost:8080/
+```
+
 ## Build Commands
 
 ### Initial Setup
@@ -278,9 +311,6 @@ python3 scripts/03-deploy-apps.py
 
 # 4. Validate end-to-end functionality
 python3 scripts/04-validate.py
-
-# 5. Cleanup (deletes namespace and Strimzi operator)
-python3 scripts/05-cleanup.py
 ```
 
 **Script Architecture:** All scripts import `scripts/common.py` which provides:
