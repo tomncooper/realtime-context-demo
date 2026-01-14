@@ -1,2 +1,6 @@
 *.pdf
 *.html
+
+# Allow HTML templates to be tracked
+!templates/*.html
+
