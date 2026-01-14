@@ -34,6 +34,10 @@ public class InteractiveQueryServer {
     private static final int PORT = 7070;
     private static final ObjectMapper MAPPER = JsonSerde.getObjectMapper();
 
+    // Windowed store query settings
+    private static final int MAX_WINDOWS_TO_RETURN = 4; // Last 4 windows per warehouse
+    private static final long RETENTION_SECONDS = 21600; // 6 hours (matches WINDOW_RETENTION in LogisticsTopology)
+
     private final KafkaStreams streams;
     private HttpServer server;
 
@@ -361,17 +365,17 @@ public class InteractiveQueryServer {
                 )
             );
 
-            // Get current time window
+            // Query the full retention window - bounded by store's 6-hour retention
             Instant now = Instant.now();
-            Instant windowStart = now.minusSeconds(900); // 15 minutes ago
+            Instant windowStart = now.minusSeconds(RETENTION_SECONDS);
 
             if (parts.length > 3 && !parts[3].isEmpty()) {
-                // Query specific warehouse
+                // Query specific warehouse - use backwardFetch for efficiency (newest first)
                 String warehouseId = parts[3];
 
                 List<Map<String, Object>> windowedResults = new ArrayList<>();
-                try (WindowStoreIterator<WarehouseMetrics> iter = store.fetch(warehouseId, windowStart, now)) {
-                    while (iter.hasNext()) {
+                try (WindowStoreIterator<WarehouseMetrics> iter = store.backwardFetch(warehouseId, windowStart, now)) {
+                    while (iter.hasNext() && windowedResults.size() < MAX_WINDOWS_TO_RETURN) {
                         KeyValue<Long, WarehouseMetrics> kv = iter.next();
                         if (kv.value != null) {
                             Map<String, Object> result = new LinkedHashMap<>();
@@ -388,26 +392,34 @@ public class InteractiveQueryServer {
                     return;
                 }
 
+                // Reverse to chronological order (oldest first) for display
+                Collections.reverse(windowedResults);
                 sendJsonResponse(exchange, windowedResults);
             } else {
-                // Query all warehouses (current window)
+                // Query all warehouses - use backwardFetchAll for efficiency
                 Map<String, List<Map<String, Object>>> allMetrics = new LinkedHashMap<>();
 
-                try (KeyValueIterator<Windowed<String>, WarehouseMetrics> iter = store.fetchAll(windowStart, now)) {
+                try (KeyValueIterator<Windowed<String>, WarehouseMetrics> iter = store.backwardFetchAll(windowStart, now)) {
                     while (iter.hasNext()) {
                         KeyValue<Windowed<String>, WarehouseMetrics> kv = iter.next();
                         if (kv.value != null) {
                             String warehouseId = kv.key.key();
-                            allMetrics.computeIfAbsent(warehouseId, k -> new ArrayList<>());
+                            List<Map<String, Object>> warehouseWindows = allMetrics.computeIfAbsent(warehouseId, k -> new ArrayList<>());
 
-                            Map<String, Object> result = new LinkedHashMap<>();
-                            result.put("window_start", kv.key.window().start());
-                            result.put("window_end", kv.key.window().end());
-                            result.put("metrics", kv.value);
-                            allMetrics.get(warehouseId).add(result);
+                            // Only add if we haven't reached MAX_WINDOWS for this warehouse
+                            if (warehouseWindows.size() < MAX_WINDOWS_TO_RETURN) {
+                                Map<String, Object> result = new LinkedHashMap<>();
+                                result.put("window_start", kv.key.window().start());
+                                result.put("window_end", kv.key.window().end());
+                                result.put("metrics", kv.value);
+                                warehouseWindows.add(result);
+                            }
                         }
                     }
                 }
+
+                // Reverse each warehouse's windows to chronological order
+                allMetrics.values().forEach(Collections::reverse);
 
                 sendJsonResponse(exchange, allMetrics);
             }
@@ -436,17 +448,17 @@ public class InteractiveQueryServer {
                 )
             );
 
-            // Get current time window
+            // Query the full retention window - bounded by store's 6-hour retention
             Instant now = Instant.now();
-            Instant windowStart = now.minusSeconds(3600); // 1 hour ago
+            Instant windowStart = now.minusSeconds(RETENTION_SECONDS);
 
             if (parts.length > 3 && !parts[3].isEmpty()) {
-                // Query specific warehouse
+                // Query specific warehouse - use backwardFetch for efficiency (newest first)
                 String warehouseId = parts[3];
 
                 List<Map<String, Object>> windowedResults = new ArrayList<>();
-                try (WindowStoreIterator<DeliveryStats> iter = store.fetch(warehouseId, windowStart, now)) {
-                    while (iter.hasNext()) {
+                try (WindowStoreIterator<DeliveryStats> iter = store.backwardFetch(warehouseId, windowStart, now)) {
+                    while (iter.hasNext() && windowedResults.size() < MAX_WINDOWS_TO_RETURN) {
                         KeyValue<Long, DeliveryStats> kv = iter.next();
                         if (kv.value != null) {
                             Map<String, Object> result = new LinkedHashMap<>();
@@ -463,26 +475,34 @@ public class InteractiveQueryServer {
                     return;
                 }
 
+                // Reverse to chronological order (oldest first) for display
+                Collections.reverse(windowedResults);
                 sendJsonResponse(exchange, windowedResults);
             } else {
-                // Query all warehouses (current window)
+                // Query all warehouses - use backwardFetchAll for efficiency
                 Map<String, List<Map<String, Object>>> allStats = new LinkedHashMap<>();
 
-                try (KeyValueIterator<Windowed<String>, DeliveryStats> iter = store.fetchAll(windowStart, now)) {
+                try (KeyValueIterator<Windowed<String>, DeliveryStats> iter = store.backwardFetchAll(windowStart, now)) {
                     while (iter.hasNext()) {
                         KeyValue<Windowed<String>, DeliveryStats> kv = iter.next();
                         if (kv.value != null) {
                             String warehouseId = kv.key.key();
-                            allStats.computeIfAbsent(warehouseId, k -> new ArrayList<>());
+                            List<Map<String, Object>> warehouseWindows = allStats.computeIfAbsent(warehouseId, k -> new ArrayList<>());
 
-                            Map<String, Object> result = new LinkedHashMap<>();
-                            result.put("window_start", kv.key.window().start());
-                            result.put("window_end", kv.key.window().end());
-                            result.put("stats", kv.value);
-                            allStats.get(warehouseId).add(result);
+                            // Only add if we haven't reached MAX_WINDOWS for this warehouse
+                            if (warehouseWindows.size() < MAX_WINDOWS_TO_RETURN) {
+                                Map<String, Object> result = new LinkedHashMap<>();
+                                result.put("window_start", kv.key.window().start());
+                                result.put("window_end", kv.key.window().end());
+                                result.put("stats", kv.value);
+                                warehouseWindows.add(result);
+                            }
                         }
                     }
                 }
+
+                // Reverse each warehouse's windows to chronological order
+                allStats.values().forEach(Collections::reverse);
 
                 sendJsonResponse(exchange, allStats);
             }
