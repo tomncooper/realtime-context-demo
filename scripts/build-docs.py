@@ -214,7 +214,7 @@ def build_html(docs_dir: Path, output_dir: Path) -> None:
         "pandoc", str(temp_md),
         "-o", str(output_html),
         "--standalone",
-        f"--template={template_path}",
+        "--template", str(template_path),
         "--toc",
         "--toc-depth=3",
         "--highlight-style=tango",
