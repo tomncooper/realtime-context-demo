@@ -272,7 +272,16 @@ def build_pdf(docs_dir: Path, output_dir: Path) -> None:
         f"--pdf-engine={pdf_engine}",
         "--highlight-style=tango",
         "--metadata", "title=Real-time Context Demo",
-    ] + extra_args
+    ]
+
+    # Add print CSS for weasyprint
+    if pdf_engine == "weasyprint":
+        print_css = docs_dir / "css" / "print.css"
+        if print_css.exists():
+            cmd.extend(["--css", str(print_css)])
+            print(f"  Using print stylesheet: {print_css}")
+
+    cmd.extend(extra_args)
 
     # Run from docs directory so relative image paths resolve
     subprocess.run(cmd, check=True, cwd=docs_dir)
