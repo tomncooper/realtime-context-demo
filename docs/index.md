@@ -618,10 +618,36 @@ quarkus.langchain4j.anthropic.api-key=${ANTHROPIC_API_KEY:not-configured}
 quarkus.langchain4j.anthropic.chat-model.model-name=claude-3-haiku-20240307
 ```
 
-By default, the system uses Ollama running locally in the Kubernetes cluster. 
-This keeps everything self-contained for demonstration purposes. 
+By default, the system uses Ollama running locally in the Kubernetes cluster.
+This illustrates how an in-house deployment would work but also keeps everything self-contained for demonstration purposes.
 For production, you might prefer a more powerful frontier model.
 
+### Trying the Chatbot with the Web Dashboard
+
+The Query API includes a built-in web dashboard that provides an easy way to interact with the AI assistant without needing to construct API calls manually.
+
+To access the dashboard:
+
+```bash
+# Port forward the query-api service
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+
+# Open in browser
+open http://localhost:8080/
+```
+
+The dashboard provides:
+
+- **AI Assistant panel**: A chat interface where you can type natural language questions about SmartShip operations
+- **Quick action buttons**: Pre-configured queries for common questions like "How many shipments are in transit?" or "Show me delayed shipments"
+- **Live statistics cards**: Real-time counts for shipments, vehicles, warehouses, and orders
+- **Alerts panel**: Displays late shipments and orders at SLA risk
+- **LLM health indicator**: Shows whether the AI assistant is connected and responsive
+
+The chat interface maintains conversation context, so you can ask follow-up questions. 
+For example, after asking about delayed shipments, you can ask "Tell me more about that customer" and the assistant will understand which customer you're referring to.
+
+The dashboard auto-refreshes statistics every 30 seconds, providing a live view of the streaming data as it flows through the system.
 
 ### Example Conversation
 
