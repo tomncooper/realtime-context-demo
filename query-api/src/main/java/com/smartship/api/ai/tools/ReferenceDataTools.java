@@ -2,10 +2,11 @@ package com.smartship.api.ai.tools;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.smartship.api.model.reference.DriverDto;
 import com.smartship.api.model.reference.ProductDto;
-import com.smartship.api.model.reference.RouteDto;
+import com.smartship.api.model.tools.AvailableDriversResult;
+import com.smartship.api.model.tools.RoutesByOriginResult;
 import com.smartship.api.services.PostgresQueryService;
+import com.smartship.api.services.ToolOperationsService;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -27,6 +28,9 @@ public class ReferenceDataTools {
 
     private static final Logger LOG = Logger.getLogger(ReferenceDataTools.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
+
+    @Inject
+    ToolOperationsService operations;
 
     @Inject
     PostgresQueryService postgresQuery;
@@ -138,34 +142,8 @@ public class ReferenceDataTools {
         LOG.info("Tool called: getAvailableDrivers");
 
         try {
-            List<DriverDto> drivers = postgresQuery
-                .findAvailableDrivers()
-                .await().atMost(TIMEOUT);
-
-            if (drivers == null || drivers.isEmpty()) {
-                return toJson(Map.of(
-                    "message", "No available drivers found. All drivers may be currently assigned or on break.",
-                    "count", 0
-                ));
-            }
-
-            List<Map<String, Object>> driverList = drivers.stream()
-                .map(d -> Map.<String, Object>of(
-                    "driver_id", d.driverId(),
-                    "name", d.firstName() + " " + d.lastName(),
-                    "license_type", d.licenseType(),
-                    "certifications", d.certifications() != null ? d.certifications() : List.of(),
-                    "home_warehouse_id", d.homeWarehouseId(),
-                    "assigned_vehicle_id", d.assignedVehicleId() != null ? d.assignedVehicleId() : "None",
-                    "status", d.status()
-                ))
-                .collect(Collectors.toList());
-
-            return toJson(Map.of(
-                "count", drivers.size(),
-                "available_drivers", driverList
-            ));
-
+            AvailableDriversResult result = operations.getAvailableDrivers();
+            return toJson(result);
         } catch (Exception e) {
             LOG.errorf(e, "Error getting available drivers");
             return "{\"error\": \"Failed to retrieve available drivers: " + e.getMessage() + "\"}";
@@ -183,52 +161,13 @@ public class ReferenceDataTools {
             return "{\"error\": \"Warehouse ID is required. Format: WH-XXX (e.g., WH-RTM)\"}";
         }
 
-        String normalizedId = normalizeWarehouseId(warehouseId);
-
         try {
-            List<RouteDto> routes = postgresQuery
-                .findRoutesByOrigin(normalizedId)
-                .await().atMost(TIMEOUT);
-
-            if (routes == null || routes.isEmpty()) {
-                return toJson(Map.of(
-                    "message", "No routes found originating from warehouse " + normalizedId,
-                    "warehouse_id", normalizedId,
-                    "count", 0
-                ));
-            }
-
-            List<Map<String, Object>> routeList = routes.stream()
-                .map(r -> Map.<String, Object>of(
-                    "route_id", r.routeId(),
-                    "origin_warehouse_id", r.originWarehouseId(),
-                    "destination_city", r.destinationCity(),
-                    "destination_country", r.destinationCountry(),
-                    "distance_km", r.distanceKm(),
-                    "estimated_hours", r.estimatedHours(),
-                    "route_type", r.routeType(),
-                    "active", r.active()
-                ))
-                .collect(Collectors.toList());
-
-            return toJson(Map.of(
-                "origin_warehouse_id", normalizedId,
-                "count", routes.size(),
-                "routes", routeList
-            ));
-
+            RoutesByOriginResult result = operations.getRoutesByOrigin(warehouseId);
+            return toJson(result);
         } catch (Exception e) {
-            LOG.errorf(e, "Error getting routes for warehouse: %s", normalizedId);
+            LOG.errorf(e, "Error getting routes for warehouse: %s", warehouseId);
             return "{\"error\": \"Failed to retrieve routes: " + e.getMessage() + "\"}";
         }
-    }
-
-    private String normalizeWarehouseId(String warehouseId) {
-        String normalized = warehouseId.toUpperCase().trim();
-        if (!normalized.startsWith("WH-")) {
-            normalized = "WH-" + normalized;
-        }
-        return normalized;
     }
 
     private String toJson(Object obj) {

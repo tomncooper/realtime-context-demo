@@ -1,5 +1,5 @@
 # Ollama LLM Server for SmartShip Logistics Assistant
-# Phase 6: Local LLM deployment for the chatbot
+# Local LLM deployment for the chatbot
 #
 # MODEL PRE-LOADING (optional - avoids download on first deploy):
 # 1. Download model locally:  ollama pull llama3.2

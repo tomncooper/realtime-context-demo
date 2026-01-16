@@ -38,7 +38,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
     com.smartship.api.model.hybrid.EnrichedVehicleState.Builder.class,
     com.smartship.api.model.hybrid.HybridQueryResult.class,
 
-    // AI Chat models (Phase 6)
+    // AI Chat models
     com.smartship.api.ai.ChatRequest.class,
     com.smartship.api.ai.ChatResponse.class
 })

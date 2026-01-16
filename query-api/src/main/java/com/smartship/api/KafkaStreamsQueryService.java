@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 /**
  * Service for querying Kafka Streams state stores via Interactive Queries.
- * Phase 4: Supports all 9 state stores with distributed queries.
+ * Supports all 9 state stores with distributed queries.
  */
 @ApplicationScoped
 public class KafkaStreamsQueryService {
@@ -36,7 +36,7 @@ public class KafkaStreamsQueryService {
     private static final String WAREHOUSE_METRICS_STORE = "warehouse-realtime-metrics";
     private static final String HOURLY_PERFORMANCE_STORE = "hourly-delivery-performance";
 
-    // Order state stores (Phase 4)
+    // Order state stores
     private static final String ORDER_STATE_STORE = "order-current-state";
     private static final String ORDERS_BY_CUSTOMER_STORE = "orders-by-customer";
     private static final String ORDER_SLA_TRACKING_STORE = "order-sla-tracking";

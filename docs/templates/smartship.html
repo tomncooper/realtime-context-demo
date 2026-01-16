@@ -6,12 +6,48 @@
     <title>$if(title)$$title$$else$SmartShip Documentation$endif$</title>
     <meta name="description" content="Real-time Context Demo - Kafka Streams, Materialized Views, and LLM-queryable API">
     <link rel="stylesheet" href="assets/css/style.css">
+$if(highlighting-css)$
+    <style>
+$highlighting-css$
+    </style>
+$endif$
     <!-- Mermaid.js for client-side diagram rendering -->
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
         mermaid.initialize({
             startOnLoad: true,
-            theme: 'default',
+            theme: 'base',
+            themeVariables: {
+                // Primary colors matching website
+                primaryColor: '#dbeafe',
+                primaryTextColor: '#1f2937',
+                primaryBorderColor: '#2563eb',
+                // Secondary/line colors
+                lineColor: '#6b7280',
+                secondaryColor: '#f3f4f6',
+                tertiaryColor: '#e5e7eb',
+                // Background
+                background: '#ffffff',
+                mainBkg: '#dbeafe',
+                // Text
+                textColor: '#1f2937',
+                // Subgraph styling - use light blue instead of yellow
+                clusterBkg: '#eff6ff',
+                clusterBorder: '#2563eb',
+                // Node styling
+                nodeBorder: '#2563eb',
+                nodeTextColor: '#1f2937',
+                // Sequence diagram
+                actorBkg: '#dbeafe',
+                actorBorder: '#2563eb',
+                actorTextColor: '#1f2937',
+                signalColor: '#1f2937',
+                signalTextColor: '#1f2937',
+                // Notes
+                noteBkgColor: '#f3f4f6',
+                noteBorderColor: '#e5e7eb',
+                noteTextColor: '#1f2937'
+            },
             flowchart: {
                 useMaxWidth: true,
                 htmlLabels: true,

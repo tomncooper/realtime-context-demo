@@ -345,3 +345,40 @@ def upload_ollama_models_to_minikube() -> bool:
 
     print("✓ Ollama models uploaded to minikube successfully")
     return True
+
+
+def prepull_ollama_image() -> bool:
+    """Pre-pull the Ollama container image into minikube.
+
+    This avoids the 10+ minute download during pod startup by pulling
+    the 3.3GB image ahead of time.
+    """
+    image = "ollama/ollama:latest"
+    print(f"\n=== Pre-pulling Ollama image ({image}) ===")
+    print("This may take several minutes on first run (image is ~3.3GB)...")
+
+    # Check if image is already present in minikube
+    result = subprocess.run(
+        ['minikube', 'image', 'ls'],
+        capture_output=True,
+        text=True,
+        check=False
+    )
+
+    if result.returncode == 0 and 'ollama/ollama' in result.stdout:
+        print(f"✓ Image {image} already present in minikube")
+        return True
+
+    # Pull the image directly into minikube
+    print(f"Pulling {image} into minikube...")
+    result = subprocess.run(
+        ['minikube', 'image', 'pull', image],
+        check=False
+    )
+
+    if result.returncode != 0:
+        print(f"Warning: Failed to pre-pull {image}, will pull during pod startup")
+        return False
+
+    print(f"✓ Image {image} pre-pulled successfully")
+    return True

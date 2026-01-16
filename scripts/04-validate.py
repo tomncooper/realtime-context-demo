@@ -133,7 +133,7 @@ def test_all_state_stores():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
-    # State Store 7: order-current-state (Phase 4)
+    # State Store 7: order-current-state
     print("\n7. order-current-state:")
     result = run_command(
         ['curl', '-s', 'http://localhost:7070/state/order-current-state'],
@@ -149,7 +149,7 @@ def test_all_state_stores():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
-    # State Store 8: orders-by-customer (Phase 4)
+    # State Store 8: orders-by-customer
     print("\n8. orders-by-customer:")
     result = run_command(
         ['curl', '-s', 'http://localhost:7070/state/orders-by-customer'],
@@ -165,7 +165,7 @@ def test_all_state_stores():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
-    # State Store 9: order-sla-tracking (Phase 4)
+    # State Store 9: order-sla-tracking
     print("\n9. order-sla-tracking:")
     result = run_command(
         ['curl', '-s', 'http://localhost:7070/state/order-sla-tracking'],
@@ -297,7 +297,7 @@ def test_query_api():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
-    # Test order state endpoints (Phase 4)
+    # Test order state endpoints
     print("\n7. Order states:")
     result = run_command(
         ['curl', '-s', 'http://localhost:8080/api/orders/state'],
@@ -310,7 +310,7 @@ def test_query_api():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
-    # Test customer order stats endpoints (Phase 4)
+    # Test customer order stats endpoints
     print("\n8. Customer order stats:")
     result = run_command(
         ['curl', '-s', 'http://localhost:8080/api/orders/by-customer/all'],
@@ -323,7 +323,7 @@ def test_query_api():
         except json.JSONDecodeError:
             print(f"   Response: {result.stdout[:200]}")
 
-    # Test SLA risk endpoints (Phase 4)
+    # Test SLA risk endpoints
     print("\n9. Orders at SLA risk:")
     result = run_command(
         ['curl', '-s', 'http://localhost:8080/api/orders/sla-risk'],
@@ -346,7 +346,6 @@ def test_query_api():
         try:
             data = json.loads(result.stdout)
             print(f"   Status: {data.get('status', 'UNKNOWN')}")
-            print(f"   Phase: {data.get('phase', 'N/A')}")
             stores = data.get('state_stores', [])
             print(f"   State stores: {len(stores)}")
         except json.JSONDecodeError:
@@ -354,7 +353,7 @@ def test_query_api():
 
 
 def test_reference_data_api():
-    """Test PostgreSQL reference data endpoints (Phase 4)."""
+    """Test PostgreSQL reference data endpoints."""
     print("\n--- Testing Reference Data API (PostgreSQL) ---")
 
     # Test warehouses endpoint
@@ -449,7 +448,7 @@ def test_reference_data_api():
 
 
 def test_hybrid_query_api():
-    """Test hybrid query endpoints (Phase 4)."""
+    """Test hybrid query endpoints."""
     print("\n--- Testing Hybrid Query API (Kafka Streams + PostgreSQL) ---")
 
     # Test customer overview (need a valid customer ID)
@@ -551,8 +550,209 @@ def validate_ollama():
         return False
 
 
+def test_mcp_api():
+    """Test MCP server endpoints (JSON-RPC protocol with Streamable HTTP transport).
+
+    The MCP Streamable HTTP transport requires:
+    1. Accept header: 'application/json, text/event-stream'
+    2. Session management via Mcp-Session-Id header
+    """
+    print("\n--- Testing MCP Server API (Model Context Protocol) ---")
+
+    # MCP Streamable HTTP requires specific Accept header
+    accept_header = 'application/json, text/event-stream'
+
+    # Step 1: Initialize MCP session
+    print("\n1. Initialize MCP session:")
+    result = run_command([
+        'curl', '-s', '-i', '-X', 'POST', 'http://localhost:8080/mcp',
+        '-H', 'Content-Type: application/json',
+        '-H', f'Accept: {accept_header}',
+        '-d', '{"jsonrpc": "2.0", "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "validation-script", "version": "1.0"}}, "id": 1}'
+    ], capture_output=True)
+
+    session_id = None
+    if result.stdout:
+        # Parse headers and body from -i output
+        # Handle both \r\n and \n line endings
+        if '\r\n\r\n' in result.stdout:
+            parts = result.stdout.split('\r\n\r\n', 1)
+            line_sep = '\r\n'
+        else:
+            parts = result.stdout.split('\n\n', 1)
+            line_sep = '\n'
+
+        headers = parts[0] if parts else ''
+        body = parts[1] if len(parts) > 1 else ''
+
+        # Extract session ID from headers
+        for line in headers.split(line_sep):
+            if line.lower().startswith('mcp-session-id:'):
+                session_id = line.split(':', 1)[1].strip()
+                break
+
+        if session_id:
+            print(f"   Session established: {session_id[:16]}...")
+            try:
+                data = json.loads(body)
+                server_info = data.get('result', {}).get('serverInfo', {})
+                print(f"   Server: {server_info.get('name', 'N/A')} v{server_info.get('version', 'N/A')}")
+            except json.JSONDecodeError:
+                print(f"   Session OK but failed to parse response")
+        else:
+            print("   Failed to establish session (no Mcp-Session-Id header)")
+            return
+    else:
+        print("   No response from server")
+        return
+
+    # Step 2: Send initialized notification
+    run_command([
+        'curl', '-s', '-X', 'POST', 'http://localhost:8080/mcp',
+        '-H', 'Content-Type: application/json',
+        '-H', f'Accept: {accept_header}',
+        '-H', f'Mcp-Session-Id: {session_id}',
+        '-d', '{"jsonrpc": "2.0", "method": "notifications/initialized"}'
+    ], capture_output=True)
+
+    # Step 3: List available tools
+    print("\n2. List available tools (tools/list):")
+    result = run_command([
+        'curl', '-s', '-X', 'POST', 'http://localhost:8080/mcp',
+        '-H', 'Content-Type: application/json',
+        '-H', f'Accept: {accept_header}',
+        '-H', f'Mcp-Session-Id: {session_id}',
+        '-d', '{"jsonrpc": "2.0", "method": "tools/list", "id": 2}'
+    ], capture_output=True)
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            if 'error' in data:
+                print(f"   Error: {data['error'].get('message', 'Unknown error')}")
+            elif 'result' in data:
+                tools = data['result'].get('tools', [])
+                print(f"   Available tools: {len(tools)}")
+                # Show first few tool names
+                tool_names = [t.get('name', 'N/A') for t in tools[:5]]
+                print(f"   Sample tools: {tool_names}")
+                if len(tools) > 5:
+                    print(f"   ... and {len(tools) - 5} more")
+            else:
+                print(f"   Unexpected response format")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+    else:
+        print("   No response")
+
+    # Step 4: Call shipment_status_counts tool
+    print("\n3. Call tool (shipment_status_counts):")
+    result = run_command([
+        'curl', '-s', '-X', 'POST', 'http://localhost:8080/mcp',
+        '-H', 'Content-Type: application/json',
+        '-H', f'Accept: {accept_header}',
+        '-H', f'Mcp-Session-Id: {session_id}',
+        '-d', '{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "shipment_status_counts", "arguments": {}}, "id": 3}'
+    ], capture_output=True)
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            if 'error' in data:
+                print(f"   Error: {data['error'].get('message', 'Unknown error')}")
+            elif 'result' in data:
+                content = data['result'].get('content', [])
+                if content and len(content) > 0:
+                    text = content[0].get('text', '')
+                    try:
+                        inner_data = json.loads(text)
+                        counts = inner_data.get('status_counts', {})
+                        total = inner_data.get('total_shipments', 0)
+                        print(f"   Total shipments: {total}")
+                        print(f"   Status counts: {counts}")
+                    except json.JSONDecodeError:
+                        print(f"   Response: {text[:100]}")
+                else:
+                    print(f"   Empty content in response")
+            else:
+                print(f"   Unexpected response format")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+    else:
+        print("   No response")
+
+    # Step 5: Call getAllVehicleStates tool
+    print("\n4. Call tool (getAllVehicleStates):")
+    result = run_command([
+        'curl', '-s', '-X', 'POST', 'http://localhost:8080/mcp',
+        '-H', 'Content-Type: application/json',
+        '-H', f'Accept: {accept_header}',
+        '-H', f'Mcp-Session-Id: {session_id}',
+        '-d', '{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "getAllVehicleStates", "arguments": {}}, "id": 4}'
+    ], capture_output=True)
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            if 'error' in data:
+                print(f"   Error: {data['error'].get('message', 'Unknown error')}")
+            elif 'result' in data:
+                content = data['result'].get('content', [])
+                if content and len(content) > 0:
+                    text = content[0].get('text', '')
+                    try:
+                        inner_data = json.loads(text)
+                        vehicles = inner_data.get('vehicles', [])
+                        print(f"   Vehicles tracked: {len(vehicles)}")
+                        if vehicles:
+                            sample = vehicles[0]
+                            print(f"   Sample: {sample.get('vehicle_id', 'N/A')} - {sample.get('status', 'N/A')}")
+                    except json.JSONDecodeError:
+                        print(f"   Response: {text[:100]}")
+                else:
+                    print(f"   Empty content in response")
+            else:
+                print(f"   Unexpected response format")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+    else:
+        print("   No response")
+
+    # Step 6: Call getWarehouseList tool
+    print("\n5. Call tool (getWarehouseList):")
+    result = run_command([
+        'curl', '-s', '-X', 'POST', 'http://localhost:8080/mcp',
+        '-H', 'Content-Type: application/json',
+        '-H', f'Accept: {accept_header}',
+        '-H', f'Mcp-Session-Id: {session_id}',
+        '-d', '{"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "getWarehouseList", "arguments": {}}, "id": 5}'
+    ], capture_output=True)
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            if 'error' in data:
+                print(f"   Error: {data['error'].get('message', 'Unknown error')}")
+            elif 'result' in data:
+                content = data['result'].get('content', [])
+                if content and len(content) > 0:
+                    text = content[0].get('text', '')
+                    try:
+                        inner_data = json.loads(text)
+                        warehouses = inner_data.get('warehouses', [])
+                        print(f"   Warehouses: {len(warehouses)}")
+                        for wh in warehouses[:3]:
+                            print(f"   - {wh.get('warehouse_id', 'N/A')}: {wh.get('name', 'N/A')} ({wh.get('city', 'N/A')})")
+                    except json.JSONDecodeError:
+                        print(f"   Response: {text[:100]}")
+                else:
+                    print(f"   Empty content in response")
+            else:
+                print(f"   Unexpected response format")
+        except json.JSONDecodeError:
+            print(f"   Response: {result.stdout[:200]}")
+    else:
+        print("   No response")
+
+
 def test_chat_api():
-    """Test LLM chat API endpoints (Phase 6)."""
+    """Test LLM chat API endpoints."""
     print("\n--- Testing Chat API (LangChain4j + Ollama) ---")
 
     # Test 1: Health check
@@ -668,8 +868,8 @@ def validate_statefulset():
 
 def main():
     print("=" * 60)
-    print("SmartShip Logistics - Phase 6 Validation")
-    print("Testing all 9 state stores + PostgreSQL + Hybrid Queries + LLM Chat")
+    print("SmartShip Logistics - Validation")
+    print("Testing all 9 state stores + PostgreSQL + Hybrid Queries + MCP + LLM Chat")
     print("=" * 60)
 
     print("\n=== Validating Infrastructure ===")
@@ -710,7 +910,10 @@ def main():
     print("\n=== Testing Hybrid Query API (Kafka Streams + PostgreSQL) ===")
     port_forward_and_test('query-api', 8080, test_hybrid_query_api)
 
-    # Validate Ollama and Chat API (Phase 6) - gracefully skip if unavailable
+    print("\n=== Testing MCP Server API (Model Context Protocol) ===")
+    port_forward_and_test('query-api', 8080, test_mcp_api)
+
+    # Validate Ollama and Chat API - gracefully skip if unavailable
     ollama_available = validate_ollama()
     if ollama_available:
         print("\n=== Testing Chat API (LangChain4j + LLM) ===")
@@ -719,7 +922,7 @@ def main():
         print("\n=== Skipping Chat API tests (Ollama not available) ===")
 
     print("\n" + "=" * 60)
-    print("Phase 6 Validation Complete!")
+    print("Validation Complete!")
     print("=" * 60)
     print("\nAll 9 state stores verified:")
     print("  1. active-shipments-by-status")
@@ -728,14 +931,14 @@ def main():
     print("  4. late-shipments")
     print("  5. warehouse-realtime-metrics (windowed)")
     print("  6. hourly-delivery-performance (windowed)")
-    print("  7. order-current-state (Phase 4)")
-    print("  8. orders-by-customer (Phase 4)")
-    print("  9. order-sla-tracking (Phase 4)")
-    print("\nPhase 4 additions:")
+    print("  7. order-current-state")
+    print("  8. orders-by-customer")
+    print("  9. order-sla-tracking")
+    print("\nAdditional features tested:")
     print("  - 17 PostgreSQL reference data endpoints")
     print("  - 6 Order state query endpoints")
     print("  - 7 Hybrid query endpoints (Kafka + PostgreSQL)")
-    print("\nPhase 6 additions:")
+    print("  - MCP server endpoint (/mcp) with 18 tools")
     print("  - 4 Chat API endpoints (/api/chat/*)")
     print("  - LangChain4j integration with Ollama")
     print("  - Session-based chat memory")

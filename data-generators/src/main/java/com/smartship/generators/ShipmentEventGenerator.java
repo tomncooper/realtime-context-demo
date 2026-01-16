@@ -14,7 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.*;
 
 /**
- * Phase 2 shipment event generator with full lifecycle support.
+ * Shipment event generator with full lifecycle support.
  * Generates events at 50-80 events/second with realistic lifecycle progression.
  *
  * Lifecycle: CREATED -> PICKED -> PACKED -> DISPATCHED -> IN_TRANSIT -> OUT_FOR_DELIVERY -> DELIVERED
@@ -47,7 +47,7 @@ public class ShipmentEventGenerator {
     private final ConcurrentHashMap<String, ShipmentSimState> activeLifecycles;
 
     public ShipmentEventGenerator() {
-        LOG.info("Initializing ShipmentEventGenerator - Phase 2");
+        LOG.info("Initializing ShipmentEventGenerator");
         this.producer = new KafkaProducer<>(KafkaConfig.createProducerConfig("shipment-event-generator"));
         this.correlationManager = DataCorrelationManager.getInstance();
         this.scheduler = Executors.newScheduledThreadPool(10);
@@ -56,7 +56,7 @@ public class ShipmentEventGenerator {
     }
 
     public void start() {
-        LOG.info("Starting ShipmentEventGenerator - Phase 2");
+        LOG.info("Starting ShipmentEventGenerator");
         LOG.info("Generating {} new shipments per second", NEW_SHIPMENTS_PER_SECOND);
 
         // Schedule new shipment creation
@@ -319,7 +319,6 @@ public class ShipmentEventGenerator {
     public static void main(String[] args) {
         LOG.info("=".repeat(60));
         LOG.info("SmartShip Logistics - Shipment Event Generator");
-        LOG.info("Phase 2: Full lifecycle event generation");
         LOG.info("=".repeat(60));
 
         ShipmentEventGenerator generator = new ShipmentEventGenerator();

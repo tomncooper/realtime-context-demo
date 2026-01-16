@@ -15,7 +15,7 @@ import java.util.Map;
 
 /**
  * REST API for querying PostgreSQL reference data.
- * Phase 4: Provides access to all 6 reference tables.
+ * Provides access to all 6 reference tables.
  */
 @Path("/api/reference")
 @Produces(MediaType.APPLICATION_JSON)

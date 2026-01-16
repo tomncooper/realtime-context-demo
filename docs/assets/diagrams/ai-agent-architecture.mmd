@@ -1,10 +1,12 @@
 flowchart TB
-    subgraph User["User"]
-        Query["'How many shipments are in transit?'"]
-    end
+
+    Query["'How many shipments are in transit?'"]
+    MCPQuery["Claude Code / Other AI Agent"]
 
     subgraph API["Query API (Quarkus)"]
+        direction LR
         Chat["ChatResource<br/>POST /api/chat"]
+        MCPEndpoint["MCP Server<br/>POST /mcp"]
         Assistant["LogisticsAssistant<br/>@RegisterAiService"]
         Memory["Session Memory<br/>(20 messages)"]
     end
@@ -13,14 +15,19 @@ flowchart TB
         Model["Ollama / OpenAI / Anthropic"]
     end
 
-    subgraph Tools["Tool Classes"]
+    subgraph Tools["LangChain4j Tools"]
         ST["ShipmentTools"]
         CT["CustomerTools"]
-        VT["VehicleTools"]
-        WT["WarehouseTools"]
-        PT["PerformanceTools"]
-        RT["ReferenceDataTools"]
+        ToolsEtc["..."]
     end
+
+    subgraph MCPTools["MCP Tools"]
+        SMT["ShipmentMcpTools"]
+        CMT["CustomerMcpTools"]
+        MCPEtc["..."]
+    end
+
+    TOS["ToolOperationsService"]
 
     subgraph Services["Query Services"]
         KS["KafkaStreamsQueryService"]
@@ -33,6 +40,7 @@ flowchart TB
         PG["PostgreSQL<br/>Reference Data"]
     end
 
+    %% Internal LLM Flow
     Query --> Chat
     Chat --> Assistant
     Assistant <--> Memory
@@ -40,21 +48,30 @@ flowchart TB
 
     Model <-.->|"tool calls"| ST
     Model <-.->|"tool calls"| CT
-    Model <-.->|"tool calls"| VT
-    Model <-.->|"tool calls"| WT
-    Model <-.->|"tool calls"| PT
-    Model <-.->|"tool calls"| RT
+    Model <-.->|"tool calls"| ToolsEtc
 
-    ST --> KS
-    CT --> QO
-    VT --> KS
-    VT --> PS
-    WT --> QO
-    PT --> KS
-    RT --> PS
+    %% External MCP Flow
+    MCPQuery -->|"MCP JSON-RPC"| MCPEndpoint
+    MCPEndpoint --> SMT
+    MCPEndpoint --> CMT
+    MCPEndpoint --> MCPEtc
+
+    %% Tools to shared service
+    ST --> TOS
+    CT --> TOS
+    ToolsEtc --> TOS
+    SMT --> TOS
+    CMT --> TOS
+    MCPEtc --> TOS
+
+    %% Shared service to query services
+    TOS --> KS
+    TOS --> PS
+    TOS --> QO
 
     QO --> KS
     QO --> PS
 
+    %% Query services to data stores
     KS --> Kafka
     PS --> PG

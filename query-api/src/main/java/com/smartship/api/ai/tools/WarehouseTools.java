@@ -3,18 +3,14 @@ package com.smartship.api.ai.tools;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartship.api.model.hybrid.HybridQueryResult;
-import com.smartship.api.model.reference.WarehouseDto;
-import com.smartship.api.services.PostgresQueryService;
-import com.smartship.api.services.QueryOrchestrationService;
+import com.smartship.api.model.tools.WarehouseListResult;
+import com.smartship.api.services.ToolOperationsService;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.time.Duration;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * LangChain4j tools for querying warehouse data.
@@ -26,13 +22,9 @@ import java.util.stream.Collectors;
 public class WarehouseTools {
 
     private static final Logger LOG = Logger.getLogger(WarehouseTools.class);
-    private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     @Inject
-    PostgresQueryService postgresQuery;
-
-    @Inject
-    QueryOrchestrationService orchestrationService;
+    ToolOperationsService operations;
 
     @Inject
     ObjectMapper objectMapper;
@@ -45,27 +37,8 @@ public class WarehouseTools {
     public String getWarehouseList() {
         LOG.info("Tool called: getWarehouseList");
         try {
-            List<WarehouseDto> warehouses = postgresQuery.getAllWarehouses()
-                .await().atMost(TIMEOUT);
-
-            if (warehouses == null || warehouses.isEmpty()) {
-                return "{\"message\": \"No warehouses found in the system.\", \"count\": 0}";
-            }
-
-            List<Map<String, Object>> warehouseList = warehouses.stream()
-                .map(w -> Map.<String, Object>of(
-                    "warehouse_id", w.warehouseId(),
-                    "name", w.name(),
-                    "city", w.city(),
-                    "country", w.country(),
-                    "status", w.status()
-                ))
-                .collect(Collectors.toList());
-
-            return toJson(Map.of(
-                "count", warehouses.size(),
-                "warehouses", warehouseList
-            ));
+            WarehouseListResult result = operations.getWarehouseList();
+            return toJson(result);
         } catch (Exception e) {
             LOG.errorf(e, "Error getting warehouse list");
             return "{\"error\": \"Failed to retrieve warehouse list: " + e.getMessage() + "\"}";
@@ -84,33 +57,25 @@ public class WarehouseTools {
             return "{\"error\": \"Warehouse ID is required. Format: WH-XXX (e.g., WH-RTM, WH-FRA)\"}";
         }
 
-        // Normalize warehouse ID format
-        String normalizedId = warehouseId.toUpperCase().trim();
-        if (!normalizedId.startsWith("WH-")) {
-            normalizedId = "WH-" + normalizedId;
-        }
-
         try {
-            HybridQueryResult<Map<String, Object>> result = orchestrationService
-                .getWarehouseOperationalStatus(normalizedId)
-                .await().atMost(TIMEOUT);
+            HybridQueryResult<Map<String, Object>> result = operations.getWarehouseStatus(warehouseId);
 
             if (result.result() == null) {
                 return toJson(Map.of(
-                    "message", "Warehouse not found: " + normalizedId,
+                    "message", "Warehouse not found: " + warehouseId,
                     "summary", result.summary(),
                     "query_time_ms", result.queryTimeMs()
                 ));
             }
 
-            Map<String, Object> status = result.result();
+            Map<String, Object> status = new java.util.LinkedHashMap<>(result.result());
             status.put("summary", result.summary());
             status.put("query_time_ms", result.queryTimeMs());
 
             return toJson(status);
         } catch (Exception e) {
-            LOG.errorf(e, "Error getting warehouse status for: %s", normalizedId);
-            return "{\"error\": \"Failed to retrieve warehouse status for " + normalizedId + ": " + e.getMessage() + "\"}";
+            LOG.errorf(e, "Error getting warehouse status for: %s", warehouseId);
+            return "{\"error\": \"Failed to retrieve warehouse status for " + warehouseId + ": " + e.getMessage() + "\"}";
         }
     }
 

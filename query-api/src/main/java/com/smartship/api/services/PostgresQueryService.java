@@ -14,7 +14,7 @@ import java.util.List;
 
 /**
  * Service for querying PostgreSQL reference data using Quarkus reactive client.
- * Phase 4: Provides non-blocking access to all 6 reference tables.
+ * Provides non-blocking access to all 6 reference tables.
  */
 @ApplicationScoped
 public class PostgresQueryService {

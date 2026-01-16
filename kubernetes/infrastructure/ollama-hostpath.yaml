@@ -1,5 +1,5 @@
 # Ollama LLM Server - hostPath variant for pre-loaded models
-# Phase 6: Use this when models are pre-loaded via scripts/01-setup-infra.py --models
+# Use this when models are pre-loaded via scripts/01-setup-infra.py --models
 #
 # This variant uses hostPath instead of PVC to mount pre-loaded models
 # from /data/ollama-models on the minikube node.

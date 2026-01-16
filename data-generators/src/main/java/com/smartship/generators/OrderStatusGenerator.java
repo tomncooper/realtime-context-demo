@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * Order status generator for Phase 2.
+ * Order status generator.
  * Generates 10-15 events/second.
  * Creates orders with 1-3 shipments.
  * SLA tiers: STANDARD (5d), EXPRESS (2d), SAME_DAY (12h), CRITICAL (4h)

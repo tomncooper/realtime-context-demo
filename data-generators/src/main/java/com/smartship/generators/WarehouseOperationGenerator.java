@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * Warehouse operation generator for Phase 2.
+ * Warehouse operation generator.
  * Generates 15-25 events/second across 5 warehouses.
  * Links PICK/PACK operations to active shipments.
  * 3% error rate.

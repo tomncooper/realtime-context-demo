@@ -1,5 +1,5 @@
 -- SmartShip Logistics Database Schema
--- Phase 2: Full reference data tables
+-- Reference data tables for warehouses, customers, vehicles, products, drivers, and routes
 
 -- Drop existing tables if they exist (in correct dependency order)
 DROP TABLE IF EXISTS routes CASCADE;

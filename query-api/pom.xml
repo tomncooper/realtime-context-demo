@@ -109,6 +109,13 @@
             <version>${quarkus-langchain4j.version}</version>
         </dependency>
 
+        <!-- MCP Server HTTP Transport (Streamable HTTP) -->
+        <dependency>
+            <groupId>io.quarkiverse.mcp</groupId>
+            <artifactId>quarkus-mcp-server-http</artifactId>
+            <version>1.8.0</version>
+        </dependency>
+
         <!-- Testing -->
         <dependency>
             <groupId>io.quarkus</groupId>

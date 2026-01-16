@@ -4,8 +4,10 @@
 
 Systems like [Apache Kafka](https://kafka.apache.org/) allow organisations to develop event driven architectures, which allow businesses to react to changes in real time. 
 While these systems provide a flexible way to implement new business processes on top of low latency data streams, it can often be difficult to analyse the state of those streams and get a clear picture of the data as it exists _now_.
+
 Typically, companies will load the streams from Kafka topics into an analytical database, like Google Big Table or a datalake based on Open Table Formats like Apache Iceberg, and query the data from there.
 Alternatively, if it is a common query, they might create specific extract-transform-load (ETL) jobs using Kafka client libraries in bespoke microservices or create a dedicated stream processing job using systems like Apache Flink.
+
 This process can be quite involved and requires time to implement and tune. 
 A simpler alternative can be to create materialized versions of key data streams using Kafka Streams tables and exposing their state stores.
 This allows the current state of the streams to be queried by various tools, including AI agents.
@@ -146,7 +148,7 @@ There are two key parts of this architecture:
 
 1. **Streams Processor (Interactive Query Server)**: `streams-processor/src/main/java/com/smartship/streams/InteractiveQueryServer.java`
    
-   Each instance of the Stream Processor application hosts an Interactive Query Server instance which implements endpoints for each of the state stores.
+   Each instance of the Stream Processor application hosts an instance of our custom _Interactive Query Server_ which implements endpoints for each of the state stores.
    They also each provide a metadata endpoint which the Query Gateway can use to discover key locations:
 
    - `/metadata/instances/{storeName}` - Lists all instances hosting a store
@@ -194,6 +196,7 @@ This code:
 4. Materializes the result into a named state store called `active-shipments-by-status`
 
 As new shipment events arrive, the counts are automatically updated in real-time.
+The keys for this store will be distributed between the instances of the Kafka Streams application.
 
 #### Step 2: Interactive Query Server Endpoints
 
@@ -228,7 +231,7 @@ private void handleActiveShipmentsByStatus(HttpExchange exchange) throws IOExcep
 }
 ```
 
-The server also provides metadata endpoints that the Query API uses to discover key locations:
+The server also provides metadata endpoints that the Query API uses to discover the location of particular keys:
 
 - `GET /metadata/instances/{storeName}` - Returns all instances hosting partitions of a store
 - `GET /metadata/instance-for-key/{storeName}/{key}` - Finds which instance holds a specific key
@@ -286,8 +289,8 @@ The following diagram illustrates the complete flow when a client requests shipm
 
 ![Query Flow Diagram](assets/imgs/query-flow.png)
 
-The key insight here is that because the state store is partitioned by key across instances, no single instance has the complete picture.
-The Query API has to aggregate results from all the Kafka Streams instances in order to provide an accurate answer.
+The key point to understand here is that because the state store is partitioned by key across instances, no single instance has the complete picture.
+The Query API (unless it is looking for a single key) has to aggregate results from all the Kafka Streams instances in order to provide an accurate answer.
 For queries that target a specific key (e.g., "What is the count for IN_TRANSIT?"), the Query API can use the metadata endpoint to route the request directly to the instance holding that key's partition.
 
 ### Other queries
@@ -296,32 +299,32 @@ The SmartShip streams-processor maintains nine state stores in total, each desig
 
 **Shipment Tracking**
 
-| State Store | Question Answered |
-|------------|-------------------|
-| `active-shipments-by-status` | How many shipments are in each status right now? |
-| `shipments-by-customer` | What are the shipment statistics for a specific customer? |
-| `late-shipments` | Which shipments are past their expected delivery time? |
+| State Store                  | Question Answered                                         |
+|------------------------------|-----------------------------------------------------------|
+| `active-shipments-by-status` | How many shipments are in each status right now?          |
+| `shipments-by-customer`      | What are the shipment statistics for a specific customer? |
+| `late-shipments`             | Which shipments are past their expected delivery time?    |
 
 **Fleet Management**
 
-| State Store | Question Answered |
-|------------|-------------------|
+| State Store             | Question Answered                                 |
+|-------------------------|---------------------------------------------------|
 | `vehicle-current-state` | Where is a specific vehicle and what is it doing? |
 
 **Warehouse Operations**
 
-| State Store | Question Answered |
-|------------|-------------------|
-| `warehouse-realtime-metrics` | What operations have occurred at each warehouse in the last 15 minutes? |
+| State Store                   | Question Answered                                                       |
+|-------------------------------|-------------------------------------------------------------------------|
+| `warehouse-realtime-metrics`  | What operations have occurred at each warehouse in the last 15 minutes? |
 | `hourly-delivery-performance` | What is the delivery performance for each warehouse over the past hour? |
 
 **Order Management**
 
-| State Store | Question Answered |
-|------------|-------------------|
-| `order-current-state` | What is the current status of a specific order? |
-| `orders-by-customer` | What are the order statistics for a specific customer? |
-| `order-sla-tracking` | Which orders are at risk of breaching their SLA? |
+| State Store           | Question Answered                                      |
+|-----------------------|--------------------------------------------------------|
+| `order-current-state` | What is the current status of a specific order?        |
+| `orders-by-customer`  | What are the order statistics for a specific customer? |
+| `order-sla-tracking`  | Which orders are at risk of breaching their SLA?       |
 
 Each state store uses an appropriate Kafka Streams pattern:
 
@@ -378,17 +381,84 @@ The Query API exposes hybrid queries through endpoints like:
 Now that we have an API for querying the real-time state of SmartShip's operations, we can integrate this with an AI agent to answer natural language questions about the state of the business.
 
 To achieve this, we need to connect a large language model (LLM) to our Query API so it can fetch the relevant data on demand.
-For this we need a way to ingest and issue queries to the LLM, provide standard system prompts and allow the LLM to invoke specific functions or tools that correspond to our API endpoints.
+There are many different ways we could implement this integration.
+However, the two we will focus on in this demonstration are:
 
-### Using LangChain4j with Quarkus
+1. Using [LangChain4j](https://docs.langchain4j.dev/) to build an internal chatbot that employees can use to ask questions about logistics operations via an internally hosted LLM and interface. This chatbot will use tool/function calling to invoke specific API endpoints to get real-time data as needed, with all the data and inference occurring within the company's infrastructure.
+2. Using [Model Context Protocol (MCP)](https://modelcontextprotocol.io) to expose the same capabilities to external AI agents via a standard interface. This allows SmartShip data engineers to easily create agentic pipelines with externally hosted LLMs and could also allow customers to connect their own AI assistants (e.g., Claude Desktop) to SmartShip's data via MCP tool calls, with the LLM processing happening on the customer's side.
 
-There are many ways to connect an LLM to external data sources and APIs. For this demonstration, we use [LangChain4j](https://docs.langchain4j.dev/), a Java library that provides a unified interface for working with large language models. 
-Quarkus has excellent support for LangChain4j through the [Quarkiverse LangChain4j extension](https://docs.quarkiverse.io/quarkus-langchain4j/dev/index.html), which provides CDI integration and simplified configuration.
+### Multiple AI Interfaces
 
-### Tool/Function Calling
+Having two access patterns is powerful, however it could lead to code duplication.
+To address this, we extracted the business logic for querying the state stores via an LLM into a shared `ToolOperationsService`. 
+This service becomes the single source of truth for all tool operations, regardless of which AI interface is calling them.
+
+![Shared Tool Architecture](assets/imgs/shared-tool-architecture.png)
+
+The `ToolOperationsService` (see `query-api/src/main/java/com/smartship/api/services/ToolOperationsService.java`) handles:
+
+1. **ID Normalization**: LLMs often pass IDs in inconsistent formats. The service normalizes `"1"`, `"0001"`, or `"CUST-0001"` to the canonical `"CUST-0001"` format.
+2. **Data Coordination**: Orchestrates calls to `KafkaStreamsQueryService`, `PostgresQueryService`, or `QueryOrchestrationService` as needed.
+3. **Error Handling**: Provides consistent error propagation regardless of caller.
+
+The tool classes become thin wrappers that delegate to this shared service:
+
+```java
+// LangChain4j Tool - converts result to JSON string for LLM
+@Tool("Get the count of shipments for each status...")
+public String getShipmentStatusCounts() {
+    ShipmentStatusResult result = operations.getShipmentStatusCounts();
+    return objectMapper.writeValueAsString(result);
+}
+
+// MCP Tool - returns result directly (framework handles serialization)
+@Tool(name = "shipment_status_counts", description = "...")
+public Object getShipmentStatusCounts() {
+    return operations.getShipmentStatusCounts();
+}
+```
+
+Both LLM interface approaches call the same `operations.getShipmentStatusCounts()` method, ensuring identical behavior. 
+The only difference is how the result is returned to the caller.
+
+#### Shared Result Types
+
+To ensure consistent data structures across interfaces, we defined shared DTOs as Java records in `query-api/src/main/java/com/smartship/api/model/tools/`. 
+These records include factory methods for common patterns:
+
+```java
+public record ShipmentStatusResult(
+    Map<String, Long> statusCounts,
+    long totalShipments,
+    String message
+) {
+    public static ShipmentStatusResult of(Map<String, Long> statusCounts) {
+        long total = statusCounts.values().stream().mapToLong(Long::longValue).sum();
+        return new ShipmentStatusResult(statusCounts, total, null);
+    }
+
+    public static ShipmentStatusResult empty() {
+        return new ShipmentStatusResult(Map.of(), 0,
+            "No shipment data available yet.");
+    }
+}
+```
+
+This pattern makes it straightforward to add new AI interfaces in the future - simply create new wrapper classes that delegate to `ToolOperationsService` and adapt the response format as needed.
+
+### Internal Chatbot
+
+For the internally hosted chatbot we need a way to ingest and issue queries to the LLM, provide standard system prompts and allow the LLM to invoke specific functions or tools that correspond to our API endpoints.
+
+#### Using LangChain4j with Quarkus
+
+For the internal chatbot implementation, we use [LangChain4j](https://docs.langchain4j.dev/), a Java library that provides a unified interface for working with large language models. 
+The Quarkus framework, which we are already using for the query-api service, has excellent support for LangChain4j through its [LangChain4j extension](https://docs.quarkiverse.io/quarkus-langchain4j/dev/index.html), which provides CDI integration and simplified configuration.
+
+#### Tool/Function Calling
 
 The key mechanism that allows an LLM to query our real-time data is **tool calling** (also known as [function calling](https://quarkus.io/quarkus-workshop-langchain4j/section-1/step-07/#function-calling)). 
-Instead of trying to embed all the data into the context, we define a set of tools that the LLM can invoke to fetch specific information on demand.
+Instead of trying to embed all the data into the context, we define a set of tools in the system context, that the LLM can invoke to fetch specific information on demand.
 
 When a user asks a question like "How many shipments are currently in transit?", the LLM:
 
@@ -404,7 +474,7 @@ This approach has several advantages:
 - Complex queries can involve multiple tool calls
 - The context window isn't consumed by unnecessary data
 
-### Defining the AI Service Interface
+#### Defining the AI Service Interface
 
 LangChain4j uses an interface-based approach where you define a service contract and the framework generates the implementation. 
 In our project, the `LogisticsAssistant` interface (see `query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java`) serves as the entry point:
@@ -443,7 +513,7 @@ The `@RegisterAiService` annotation tells LangChain4j to:
 
 The `@SystemMessage` provides context to the LLM about its role and capabilities.
 
-### Implementing Tools
+#### Implementing Tools
 
 Each tool class contains methods, annotated with `@Tool`, that the LLM can invoke. 
 Here's an example from `ShipmentTools` (see `query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java`):
@@ -517,22 +587,23 @@ Key patterns in our tool implementations:
 4. **Error handling**: Return error JSON instead of throwing exceptions
 5. **Inject services**: Tools call the existing query services to fetch data
 
-### Tool Categories
+#### Tool Categories
 
 We organized tools into six categories matching our data domains:
 
 | Tool Class         | Methods | Data Source                | Purpose                                         |
 |--------------------|---------|----------------------------|-------------------------------------------------|
-| ShipmentTools      | 3       | Kafka Streams              | Shipment counts, late shipments, customer stats |
-| CustomerTools      | 2       | PostgreSQL + Hybrid        | Customer search, overview with real-time stats  |
-| WarehouseTools     | 2       | PostgreSQL + Hybrid        | Warehouse list, operational status              |
-| VehicleTools       | 4       | Kafka Streams + PostgreSQL | Vehicle status, fleet overview, utilization     |
-| PerformanceTools   | 3       | Kafka Streams              | Warehouse metrics, delivery performance         |
-| ReferenceDataTools | 4       | PostgreSQL                 | Products, drivers, routes                       |
+| ShipmentTools      | 4       | Kafka Streams              | Shipment counts, late shipments, customer stats |
+| CustomerTools      | 3       | PostgreSQL + Hybrid        | Customer search, overview, SLA compliance       |
+| WarehouseTools     | 3       | PostgreSQL + Hybrid        | Warehouse list, status, performance metrics     |
+| VehicleTools       | 3       | Kafka Streams + PostgreSQL | Vehicle state, fleet status, utilization        |
+| OrderTools         | 3       | Kafka Streams              | Order state, SLA risk, customer order stats     |
+| ReferenceDataTools | 2       | PostgreSQL                 | Available drivers, routes by origin             |
 
-Tools that call `QueryOrchestrationService` perform hybrid queries, combining PostgreSQL reference data with Kafka Streams real-time state.
+These tools delegate to a shared `ToolOperationsService` which centralizes the business logic and data access patterns.
 
-### Session Memory
+
+#### Session Memory
 
 To support multi-message conversations, we implement a `ChatMemoryProvider` (see `query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java`) that maintains conversation history per session:
 
@@ -561,7 +632,7 @@ public class SessionChatMemoryProvider implements Supplier<ChatMemoryProvider> {
 
 This implementation stores conversation history in memory with a 20-message window per session. For a production system, you would likely use a persistent store like Redis.
 
-### REST API
+#### REST API
 
 The chat endpoint in `ChatResource` exposes the AI assistant via HTTP:
 
@@ -596,7 +667,7 @@ public class ChatResource {
 }
 ```
 
-### LLM Provider Configuration
+#### LLM Provider Configuration
 
 The system supports multiple LLM providers, configured via `application.properties`:
 
@@ -622,9 +693,11 @@ By default, the system uses Ollama running locally in the Kubernetes cluster.
 This illustrates how an in-house deployment would work but also keeps everything self-contained for demonstration purposes.
 For production, you might prefer a more powerful frontier model.
 
-### Trying the Chatbot with the Web Dashboard
+#### Trying the Chatbot with the Web Dashboard
 
 The Query API includes a built-in web dashboard that provides an easy way to interact with the AI assistant without needing to construct API calls manually.
+
+![AI Assistant Dashboard](assets/imgs/smartship-logistics-dashboard.png)
 
 To access the dashboard:
 
@@ -633,7 +706,7 @@ To access the dashboard:
 kubectl port-forward svc/query-api 8080:8080 -n smartship &
 
 # Open in browser
-open http://localhost:8080/
+xdg-open http://localhost:8080/
 ```
 
 The dashboard provides:
@@ -649,7 +722,7 @@ For example, after asking about delayed shipments, you can ask "Tell me more abo
 
 The dashboard auto-refreshes statistics every 30 seconds, providing a live view of the streaming data as it flows through the system.
 
-### Example Conversation
+#### Example Conversation
 
 Here's an example of how the system handles a multi-turn conversation:
 
@@ -703,25 +776,204 @@ Using the session context (the LLM remembers CUST-0042 from the previous respons
 
 **Assistant**: "Customer CUST-0042 is Müller GmbH, a Premium tier customer based in Munich. They have a 94.2% on-time delivery rate across 156 total shipments. Currently they have 12 shipments in transit and 3 pending orders..."
 
-### Architecture Overview
+### Enabling External AI Agents with MCP
+
+#### The Problem: Internal-Only Access
+
+The LangChain4j chatbot works well for users accessing SmartShip through the internal web dashboard, but it has a limitation: the LLM runs server-side, and the only way to interact with it is through the `/api/chat` HTTP endpoint. 
+What about users who want to:
+
+- Use their preferred AI assistant (Claude Desktop, ChatGPT, or a custom agent) to query logistics data?
+- Integrate SmartShip data into their own AI-powered applications?
+- Automate queries from scripts or monitoring systems?
+
+Building custom integrations for each AI platform would be impractical. 
+We need a standard protocol that any AI agent can use.
+
+#### The Solution: Model Context Protocol (MCP)
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard for connecting AI applications to external data sources. 
+Rather than building custom integrations for each AI platform, we implement a single MCP server that any MCP-compatible agent can connect to.
+
+MCP provides a standardized way for AI agents to:
+
+1. **Discover** what tools are available
+2. **Understand** what each tool does (via descriptions)
+3. **Invoke** tools with structured arguments
+4. **Receive** structured results
+
+This is essentially what our LangChain4j tools already do - just with a different protocol. 
+Because we extracted the business logic into `ToolOperationsService`, adding MCP support requires only creating thin wrapper classes.
+
+#### Quarkus MCP Server Extension
+
+Implementing the MCP protocol from scratch would require handling:
+
+- JSON-RPC 2.0 message parsing and validation
+- Server-Sent Events (SSE) connection management
+- Session tracking and message routing
+- Tool discovery and schema generation
+- Request/response correlation across async streams
+
+The [Quarkus MCP Server extension](https://docs.quarkiverse.io/quarkus-mcp-server/dev/index.html) handles all of this infrastructure. 
+As developers, we only need to:
+
+1. **Add the dependency** to `pom.xml`
+2. **Configure the endpoint** in `application.properties`
+3. **Annotate methods** with `@Tool` to expose them
+
+The extension automatically:
+- Generates tool schemas from method signatures and `@ToolArg` annotations
+- Handles JSON serialization of return values
+- Manages SSE connections and session state
+- Routes incoming requests to the correct tool method
+- Formats responses according to the MCP specification
+
+This means our MCP tool classes contain almost no boilerplate - just the business logic delegation:
+
+```java
+@Singleton
+public class ShipmentMcpTools {
+
+    @Inject
+    ToolOperationsService operations;
+
+    @Tool(name = "shipment_status_counts",
+          description = "Get the count of shipments for each status. " +
+                        "Returns counts for CREATED, PICKED, PACKED, DISPATCHED, " +
+                        "IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, EXCEPTION, CANCELLED.")
+    public Object getShipmentStatusCounts() {
+        try {
+            return operations.getShipmentStatusCounts();
+        } catch (Exception e) {
+            return ToolError.of("Failed to retrieve shipment status counts", e);
+        }
+    }
+}
+```
+
+The Quarkus MCP Server extension handles JSON serialization automatically - we just return the result object directly.
+Compare this to implementing MCP manually, which would require hundreds of lines of protocol handling code.
+
+#### Configuring the MCP Endpoint
+
+The MCP server is enabled through the main Quarkus configuration:
+
+```properties
+# application.properties
+quarkus.mcp.server.server-info.name=smartship-logistics
+quarkus.mcp.server.server-info.version=1.0.0
+quarkus.mcp.server.http.root-path=/mcp
+```
+
+This exposes the MCP protocol at `/mcp` using Streamable HTTP transport. 
+The server identifies itself as "smartship-logistics" to connected clients.
+
+#### Testing the MCP Endpoint
+
+You can test the MCP server directly with curl. The MCP Streamable HTTP transport requires:
+1. `Accept: application/json, text/event-stream` header
+2. Session initialization before calling tools
+3. `Mcp-Session-Id` header for subsequent requests
+
+```bash
+# Port forward the query-api service
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+
+# Step 1: Initialize session (note the Accept header and -i to capture session ID)
+curl -i -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc": "2.0", "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "curl", "version": "1.0"}}, "id": 1}'
+
+# Response includes: Mcp-Session-Id: <session-id>
+# Use this session ID in subsequent requests
+
+# Step 2: Send initialized notification
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc": "2.0", "method": "notifications/initialized"}'
+
+# Step 3: List available tools
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 2}' | jq
+
+# Step 4: Call a tool
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {"name": "shipment_status_counts", "arguments": {}},
+    "id": 3
+  }' | jq
+```
+
+#### Connecting Claude Desktop
+
+To connect Claude Desktop to SmartShip's MCP server, add this to your Claude Desktop configuration:
+
+```json
+{
+  "mcpServers": {
+    "smartship-logistics": {
+      "http": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+After connecting, Claude Desktop users can ask natural language questions about SmartShip logistics data, and Claude will automatically invoke the appropriate MCP tools to fetch real-time information.
+
+#### Available Tools
+
+The MCP server exposes 18 tools matching the LangChain4j tool set:
+
+| Category       | Tools                                                                                       |
+|----------------|---------------------------------------------------------------------------------------------|
+| **Shipments**  | `shipment_status_counts`, `late_shipments`, `shipment_by_status`, `customer_shipment_stats` |
+| **Vehicles**   | `vehicle_state`, `all_vehicle_states`, `fleet_utilization`                                  |
+| **Customers**  | `customer_overview`, `customer_sla_compliance`, `find_customers_by_name`                    |
+| **Orders**     | `orders_at_sla_risk`, `order_state`, `customer_order_stats`                                 |
+| **Warehouses** | `warehouse_list`, `warehouse_status`, `warehouse_performance`                               |
+| **Reference**  | `available_drivers`, `routes_by_origin`                                                     |
+
+Because these tools share the same `ToolOperationsService`, they return identical data whether called from the internal chatbot or external AI agents.
+
+## Architecture Overview
 
 The diagram below shows the full architecture and how natural language queries flow through the system:
 
 ![AI Agent Architecture](assets/imgs/ai-agent-architecture.png)
 
+The architecture supports two AI integration paths:
+
+1. **Internal LLM (LangChain4j)**: Users interact via `/api/chat`, the LLM invokes tools, and responses are synthesized in natural language
+2. **External AI Agents (MCP)**: External agents connect via `/mcp`, invoke tools directly, and receive structured JSON responses
+
 This system allows users to ask complex questions about the real-time state of SmartShip's operations in natural language.
 Crucially, the LLM is able to provide accurate, up-to-date answers by invoking tools that query the live Kafka Streams state stores and PostgreSQL reference data.
-The LLM doesn't need to know the details of how data is stored or queried. 
+The LLM doesn't need to know the details of how data is stored or queried.
 It simply invokes tools with descriptive names, receives JSON responses, and uses that data to formulate answers.
 
-### Limitations and Considerations
+## Limitations and Considerations
 
-This implementation is a demonstration of what's possible, not a production-ready solution. Key limitations include:
+This implementation is a demonstration of what's possible, not a production-ready solution. 
+There are some limitations, which include:
 
 - **In-memory session storage**: Conversation history is lost on restart
 - **No rate limiting**: Production systems need throttling
 - **Single model configuration**: No automatic fallback between providers
 - **No streaming responses**: Responses arrive all at once
+- **MCP authentication**: The MCP endpoint has no authentication (relies on network security)
+- **Tool result size**: Large result sets are truncated to prevent context overflow in more modest demo models
 
 For a production deployment, you would also want to consider:
 
@@ -729,5 +981,8 @@ For a production deployment, you would also want to consider:
 - Observability and logging of LLM interactions for debugging and improvement
 - Caching of expensive queries to reduce latency
 - Fine-tuning or RAG for domain-specific knowledge beyond what tools provide
+- MCP endpoint authentication (API keys, OAuth, or mTLS)
+- Rate limiting per MCP session to prevent abuse
 
 Despite these limitations, this implementation demonstrates the core concept: connecting an LLM to real-time streaming data through tool calling, enabling natural language queries against the current state of your business operations.
+It also shows how Kafka Streams and the Quarkus framework make constructing these kind of real-time context setups easy to achieve.

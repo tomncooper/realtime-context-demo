@@ -1,6 +1,6 @@
 # SmartShip Logistics Implementation Plan
 
-**Status:** Phase 1 ✅ COMPLETED | Phase 2 ✅ COMPLETED | Phase 3 ✅ COMPLETED | Phase 4 ✅ COMPLETED | Phase 5 ✅ COMPLETED | Phase 6 ✅ COMPLETED | Phase 7-8 Pending (Advanced LLM Features)
+**Status:** Phase 1-5 ✅ COMPLETED | Phase 6 ✅ COMPLETED (LangChain4j + ToolOperationsService) | Phase 7 ✅ COMPLETED (MCP Server + Web Dashboard) | Phase 8 Pending (Guardrails & Streaming)
 
 ## Overview
 
@@ -332,16 +332,19 @@ quarkus.container-image.builder=jib
 
 ## Technology Stack
 
-### Core Technologies (✅ Phase 1 Implemented)
+### Core Technologies (✅ Phase 1-7 Implemented)
 - **Java:** 25 LTS (eclipse-temurin:25-jdk-ubi10-minimal base image, records, pattern matching, GraalVM native image support)
 - **Build Tool:** Maven 3.9+ (superior Avro plugin, simpler multi-module)
 - **Kafka:** 4.1.1 (clients + streams) with **KRaft mode** (no ZooKeeper)
 - **Avro:** 1.12.1
 - **Apicurio Registry:** 3.1.4 (Avro Serdes)
 - **Quarkus:** 3.30.1 (REST API, Kafka integration, reactive PostgreSQL)
+- **Quarkus LangChain4j:** 1.5.0.CR2 (LLM chatbot with tool use)
+- **Quarkus MCP Server:** 1.8.0 (Model Context Protocol for external AI agents)
 - **SLF4J:** 2.0.17
 - **Logback:** 1.5.12
 - **PostgreSQL:** 15 (postgres:15-alpine)
+- **Ollama:** llama3.2 model (local LLM for chat)
 - **Strimzi Operator:** 0.49.0 (supports Kafka 4.1.1 with KRaft)
 - **Containerization:** Jib Maven Plugin 3.5.1 with podman/docker support
 - **Deployment Automation:** Python 3.9+ scripts
@@ -838,45 +841,78 @@ quarkus.native.resources.includes=META-INF/services/**
 | JVM | 256Mi | 512Mi | 200m | 400m | ~10s |
 | Native | 64Mi | 128Mi | 100m | 250m | <100ms |
 
-### Phase 6: Minimal LLM Integration ✅ COMPLETED
+### Phase 6: LLM Chatbot with LangChain4j Tools ✅ COMPLETED
 **Status:** ✅ Complete
 **Timeline:** Completed January 2026
-**Goal:** Simple LLM chatbot demonstrating real-time data queries using Quarkus LangChain4j
+**Goal:** Full-featured LLM chatbot with comprehensive tool coverage using Quarkus LangChain4j
 
 **Scope (Implemented):**
 - ✅ **LangChain4j Integration:** Quarkus LangChain4j 1.5.0.CR2 with multi-provider support
 - ✅ **AI Service:** LogisticsAssistant interface with @RegisterAiService
-- ✅ **Tool Classes:** 2 tool classes (ShipmentTools, CustomerTools) with 5 @Tool methods
-- ✅ **REST Endpoint:** `POST /api/chat` with session-based chat memory
+- ✅ **Tool Classes:** 6 LangChain4j tool classes with 18 @Tool methods
+- ✅ **Shared Business Logic:** ToolOperationsService with 16 operations and ID normalization
+- ✅ **Result DTOs:** 15 shared result record classes in `model/tools/`
+- ✅ **REST Endpoints:** 4 chat endpoints (`/api/chat`, health, sessions)
 - ✅ **LLM Providers:** Ollama (primary), OpenAI, Anthropic (configurable via environment)
 - ✅ **Kubernetes:** Ollama StatefulSet with 20Gi storage, llama3.2 model
+
+**LangChain4j Tool Classes (6 classes, 18 methods):**
+
+| Class | @Tool Methods | Description |
+|-------|---------------|-------------|
+| `ShipmentTools.java` | 3 | Status counts, late shipments, customer stats |
+| `VehicleTools.java` | 4 | Vehicle state, fleet overview, warehouse vehicles, fleet utilization |
+| `CustomerTools.java` | 2 | Customer overview (hybrid), company name search |
+| `WarehouseTools.java` | 2 | Warehouse list, operational status (hybrid) |
+| `PerformanceTools.java` | 3 | Hourly delivery performance, warehouse metrics, all metrics |
+| `ReferenceDataTools.java` | 4 | Products by category, product search, available drivers, routes |
+
+**ToolOperationsService (Shared Business Logic):**
+Central `@ApplicationScoped` service used by all tool classes with:
+- **ID Normalization:** `normalizeCustomerId()`, `normalizeVehicleId()`, `normalizeWarehouseId()`, `normalizeOrderId()`
+- **16 Business Operations:** Grouped by domain (shipments, vehicles, customers, orders, warehouses, reference data)
+- **Error Handling:** `ToolOperationException` with descriptive messages
+- **Timeouts:** 30-second default for async operations
+- **Dependencies:** `KafkaStreamsQueryService`, `PostgresQueryService`, `QueryOrchestrationService`
+
+**Result DTO Records (15 classes in `model/tools/`):**
+- `ShipmentStatusResult`, `LateShipmentsResult`, `ShipmentByStatusResult`, `CustomerShipmentStatsResult`
+- `VehicleStateResult`, `FleetStatusResult`, `FleetUtilizationResult`
+- `CustomerSearchResult`, `OrdersAtRiskResult`, `OrderStateResult`, `CustomerOrderStatsResult`
+- `WarehouseListResult`, `WarehousePerformanceResult`
+- `ToolError` (generic error record with factory methods)
 
 **Tasks Completed:**
 1. ✅ Added LangChain4j dependencies to query-api/pom.xml (core, ollama, openai, anthropic)
 2. ✅ Added LLM configuration to application.properties (multi-provider support)
 3. ✅ Created ChatRequest and ChatResponse DTOs
-4. ✅ Created SessionChatMemoryProvider with 20-message window
-5. ✅ Created ShipmentTools with 3 @Tool methods (status counts, late shipments, customer stats)
-6. ✅ Created CustomerTools with 2 @Tool methods (customer overview, company search)
-7. ✅ Created LogisticsAssistant AI service interface with system message
-8. ✅ Created ChatResource REST endpoint at /api/chat
-9. ✅ Updated NativeImageReflectionConfig for AI classes
-10. ✅ Created ollama.yaml Kubernetes manifest (StatefulSet, Service, PVC)
-11. ✅ Updated kustomization.yaml to include Ollama
+4. ✅ Created SessionChatMemoryProvider with 20-message window (ConcurrentHashMap storage)
+5. ✅ Created ToolOperationsService with 16 business operations and ID normalization
+6. ✅ Created 6 LangChain4j tool classes with 18 @Tool methods total
+7. ✅ Created 15 result DTO records for consistent tool responses
+8. ✅ Created LogisticsAssistant AI service interface with detailed system message
+9. ✅ Created ChatResource REST endpoint with 4 endpoints (chat, health, sessions, clear)
+10. ✅ Updated NativeImageReflectionConfig for AI and DTO classes
+11. ✅ Created ollama.yaml Kubernetes manifest (StatefulSet, Service, PVC)
+12. ✅ Updated kustomization.yaml to include Ollama
 
 **Deliverables (Achieved):**
-- ✅ LLM chatbot answering questions about shipments and customers
-- ✅ Real-time data from Kafka Streams state stores
-- ✅ PostgreSQL reference data integration
+- ✅ LLM chatbot answering questions across all logistics domains
+- ✅ Real-time data from Kafka Streams state stores (9 stores)
+- ✅ PostgreSQL reference data integration (6 tables)
+- ✅ Hybrid queries combining real-time and reference data
 - ✅ Session-based chat memory for multi-turn conversations
 - ✅ Configurable LLM backend (Ollama, OpenAI, Anthropic)
-- ✅ OpenAPI documentation for chat endpoint
+- ✅ OpenAPI documentation for chat endpoints
+- ✅ LLM health check endpoint with provider status
 
 **Key Implementation Decisions:**
 - Used **Quarkus LangChain4j 1.5.0.CR2** for compatibility with Quarkus 3.30.1
 - Used **Ollama with llama3.2** as default local LLM (configurable via LLM_PROVIDER env var)
-- Wrapped existing services (KafkaStreamsQueryService, QueryOrchestrationService) with @Tool methods
-- Used **in-memory chat session storage** (simple for Phase 6, Redis in Phase 7+)
+- Created **ToolOperationsService** as shared business logic layer (reused by MCP in Phase 7)
+- Used **record classes** for all result DTOs (immutable, compact)
+- Used **ID normalization** to handle various input formats (CUST-1, cust-0001, 1 → CUST-0001)
+- Used **in-memory chat session storage** with ConcurrentHashMap (production should use Redis)
 - Extended existing query-api module rather than creating new module
 
 **Minikube Requirements Update:**
@@ -896,8 +932,14 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 - `query-api/src/main/java/com/smartship/api/ai/ChatRequest.java`
 - `query-api/src/main/java/com/smartship/api/ai/ChatResponse.java`
 - `query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/VehicleTools.java`
 - `query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/WarehouseTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/PerformanceTools.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/ReferenceDataTools.java`
 - `query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java`
+- `query-api/src/main/java/com/smartship/api/services/ToolOperationsService.java`
+- `query-api/src/main/java/com/smartship/api/model/tools/*.java` (15 result records)
 - `kubernetes/infrastructure/ollama.yaml`
 
 **Example Queries:**
@@ -906,82 +948,153 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 3. "Show me the shipment stats for customer CUST-0001"
 4. "Find customers with 'Tech' in their name"
 5. "Give me an overview of customer CUST-0050"
+6. "What's the status of vehicle VEH-001?"
+7. "Show fleet utilization"
+8. "List all warehouses"
+9. "Show delivery performance for Rotterdam"
+10. "Find available drivers"
 
-### Phase 7: Additional Tools & Web UI ⏭️ PENDING
-**Status:** Pending
-**Goal:** Expand LLM tool coverage and add web-based chat interface for demos
+### Phase 7: MCP Server & Web Dashboard ✅ COMPLETED
+**Status:** ✅ Complete
+**Timeline:** Completed January 2026
+**Goal:** Expose logistics tools via MCP protocol for external AI agents and add web-based dashboard
 
-**Building on Phase 6:**
-Phase 6 established the foundation with ShipmentTools (3 methods), CustomerTools (2 methods), and WarehouseTools (2 methods). Phase 7 adds remaining tool classes and a simple web UI for demos.
+**Scope (Implemented):**
+- ✅ **Quarkus MCP Server:** quarkus-mcp-server-sse 1.8.0 with Streamable HTTP transport
+- ✅ **MCP Tool Classes:** 6 MCP tool classes with 18 curated tools
+- ✅ **Shared Logic:** MCP tools reuse ToolOperationsService from Phase 6
+- ✅ **Web Dashboard:** Full-featured dashboard with AI chat, statistics, and alerts
+- ✅ **Static Files:** 4 files in META-INF/resources (HTML, CSS, 2 JS)
 
-**Scope:**
-
-**Part A: Additional Tool Classes (3 new classes)**
-- **VehicleTools:** Vehicle state, location, and fleet queries
-- **PerformanceTools:** Hourly delivery performance and warehouse metrics queries
-- **ReferenceDataTools:** PostgreSQL reference data queries (products, drivers, routes)
-
-**Part B: Web UI**
-- Simple static HTML with `wc-chatbot` web component (CDN-loaded via jsDelivr)
-- No build tooling required (no npm/Node.js)
-- Connects to existing `/api/chat` REST endpoint
-- Example query suggestions panel for demo convenience
-- SmartShip Logistics branding
-
-**No New Dependencies Required:**
-- wc-chatbot loaded via CDN (jsDelivr)
-- Quarkus automatically serves static files from `META-INF/resources`
-
-**Files to Create:**
-| File | Description |
-|------|-------------|
-| `api/ai/tools/VehicleTools.java` | Vehicle state and fleet queries (3-4 @Tool methods) |
-| `api/ai/tools/PerformanceTools.java` | Delivery performance queries (2-3 @Tool methods) |
-| `api/ai/tools/ReferenceDataTools.java` | Reference data queries (3-4 @Tool methods) |
-| `META-INF/resources/index.html` | Main chat UI page with wc-chatbot component |
-| `META-INF/resources/chat.js` | JavaScript to connect UI to /api/chat endpoint |
-| `META-INF/resources/styles.css` | SmartShip Logistics theme styling |
-
-**Files to Modify:**
-| File | Change |
-|------|--------|
-| `api/ai/LogisticsAssistant.java` | Register VehicleTools, PerformanceTools, ReferenceDataTools in @RegisterAiService |
-
-**Web UI Details:**
-
-*index.html structure:*
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>SmartShip Logistics Assistant</title>
-    <script src="https://cdn.jsdelivr.net/npm/wc-chatbot"></script>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <header>SmartShip Logistics AI Assistant</header>
-    <main>
-        <chat-bot></chat-bot>
-        <aside><!-- Example queries panel --></aside>
-    </main>
-    <script type="module" src="chat.js"></script>
-</body>
-</html>
+**MCP Server Architecture:**
+```
+External AI Agent → /mcp (Streamable HTTP) → MCP Tool Classes → ToolOperationsService
+                                                                        ↓
+                                                    KafkaStreamsQueryService + PostgresQueryService
 ```
 
-*Example Query Suggestions:*
-- "How many shipments are in transit?"
-- "Which shipments are delayed?"
-- "Show customer CUST-0001 overview"
-- "What's the status of vehicle VEH-001?"
-- "List all warehouses"
-- "Show delivery performance for WH-RTM"
+**MCP Tool Classes (6 classes, 18 tools):**
 
-**Building on Phase 6:**
-- Leverages existing LangChain4j integration
-- Uses existing KafkaStreamsQueryService for real-time data
-- Uses existing PostgresQueryService for reference data
-- Extends LogisticsAssistant with additional tools
+| Class | Tools | Description |
+|-------|-------|-------------|
+| `ShipmentMcpTools.java` | 4 | `shipment_status_counts`, `late_shipments`, `shipment_by_status`, `customer_shipment_stats` |
+| `VehicleMcpTools.java` | 3 | `vehicle_state`, `all_vehicle_states`, `fleet_utilization` |
+| `CustomerMcpTools.java` | 3 | `customer_overview`, `customer_sla_compliance`, `find_customers_by_name` |
+| `OrderMcpTools.java` | 3 | `orders_at_sla_risk`, `order_state`, `customer_order_stats` |
+| `WarehouseMcpTools.java` | 3 | `warehouse_list`, `warehouse_status`, `warehouse_performance` |
+| `ReferenceMcpTools.java` | 2 | `available_drivers`, `routes_by_origin` |
+
+**MCP Configuration (application.properties):**
+```properties
+quarkus.mcp.server.server-info.name=smartship-logistics
+quarkus.mcp.server.server-info.version=1.0.0
+quarkus.mcp.server.http.root-path=/mcp
+```
+
+**Web Dashboard Components:**
+
+| File | Purpose |
+|------|---------|
+| `index.html` | Dashboard layout with 6 cards (AI, Shipments, Fleet, Warehouses, Orders, Alerts) |
+| `styles.css` | CSS custom properties, responsive grid (3/2/1 columns), card styling |
+| `dashboard.js` | 30-second auto-refresh, parallel API fetches, render functions |
+| `chat.js` | Session management, thinking timer, LLM health status indicator |
+
+**Dashboard Features:**
+- **AI Assistant Card:** Chat interface with suggestion buttons, session management, thinking timer
+- **Shipments Card:** In Transit, Delivered, Created, Late counts
+- **Vehicle Fleet Card:** Active, Idle, Maintenance counts with average load %
+- **Warehouses Card:** Operation counts per warehouse (5 warehouses)
+- **Orders Card:** Pending, Confirmed, Shipped, At Risk counts
+- **Alerts Card:** Full-width card showing late shipments and SLA-at-risk orders
+- **LLM Status:** Real-time connection status (up/down/degraded) with provider name
+
+**Tasks Completed:**
+1. ✅ Added quarkus-mcp-server-sse dependency (1.8.0)
+2. ✅ Configured MCP server in application.properties
+3. ✅ Created 6 MCP tool classes with `@Tool` annotations
+4. ✅ MCP tools delegate to existing ToolOperationsService (no code duplication)
+5. ✅ Created index.html with responsive dashboard layout
+6. ✅ Created styles.css with CSS custom properties and card styling
+7. ✅ Created dashboard.js with auto-refresh and parallel API fetches
+8. ✅ Created chat.js with session management and LLM health monitoring
+9. ✅ Updated NativeImageReflectionConfig for MCP classes
+
+**Deliverables (Achieved):**
+- ✅ MCP server endpoint at `/mcp` for external AI agents
+- ✅ 18 curated MCP tools covering all logistics domains
+- ✅ Streamable HTTP transport (protocol version 2025-03-26)
+- ✅ Web dashboard with live statistics (30-second refresh)
+- ✅ AI chat interface integrated in dashboard
+- ✅ LLM health monitoring with visual status indicator
+- ✅ Responsive layout (desktop, tablet, mobile)
+
+**Key Implementation Decisions:**
+- Used **Quarkus MCP Server 1.8.0** with Streamable HTTP transport (not SSE-only)
+- **Shared ToolOperationsService** between LangChain4j and MCP tools (consistent behavior)
+- Used **same result DTOs** for both LangChain4j (JSON serialized) and MCP (direct return)
+- **Curated tool set:** MCP exposes 18 tools (subset of full capability, optimized for external agents)
+- Used **vanilla JavaScript** for dashboard (no npm/Node.js required)
+- Used **CSS Grid** with responsive breakpoints for dashboard layout
+- Used **localStorage** for chat session persistence
+
+**Testing MCP Endpoint:**
+
+The MCP Streamable HTTP transport requires session initialization and specific headers:
+
+```bash
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+
+# Step 1: Initialize session (capture Mcp-Session-Id from response headers)
+curl -i -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc": "2.0", "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "curl", "version": "1.0"}}, "id": 1}'
+
+# Step 2: Send initialized notification (use session ID from step 1)
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc": "2.0", "method": "notifications/initialized"}'
+
+# Step 3: List available tools
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 2}' | jq
+
+# Step 4: Call a tool
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {"name": "shipment_status_counts", "arguments": {}},
+    "id": 3
+  }' | jq
+```
+
+**Files Created:**
+- `query-api/src/main/java/com/smartship/api/mcp/ShipmentMcpTools.java`
+- `query-api/src/main/java/com/smartship/api/mcp/VehicleMcpTools.java`
+- `query-api/src/main/java/com/smartship/api/mcp/CustomerMcpTools.java`
+- `query-api/src/main/java/com/smartship/api/mcp/OrderMcpTools.java`
+- `query-api/src/main/java/com/smartship/api/mcp/WarehouseMcpTools.java`
+- `query-api/src/main/java/com/smartship/api/mcp/ReferenceMcpTools.java`
+- `query-api/src/main/resources/META-INF/resources/index.html`
+- `query-api/src/main/resources/META-INF/resources/styles.css`
+- `query-api/src/main/resources/META-INF/resources/dashboard.js`
+- `query-api/src/main/resources/META-INF/resources/chat.js`
+
+**Accessing Web Dashboard:**
+```bash
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+open http://localhost:8080/
+```
 
 ### Phase 8: Guardrails, Streaming & Observability ⏭️ PENDING
 **Status:** Pending
@@ -1105,31 +1218,40 @@ Phase 6 established the foundation with ShipmentTools (3 methods), CustomerTools
 13. **kubernetes/overlays/minikube/kustomization.yaml** - Minikube deployment
 14. **kubernetes/infrastructure/init.sql** - PostgreSQL DDL (single source of truth for reference data)
 
-### Phase 6 (LLM Chatbot - COMPLETED)
+### Phase 6 (LangChain4j Chatbot - COMPLETED)
 15. **query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java** - AI service interface ✅
 16. **query-api/src/main/java/com/smartship/api/ai/ChatResource.java** - Chat REST endpoints ✅
 17. **query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java** - Shipment query tools ✅
-18. **query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java** - Customer query tools ✅
-19. **query-api/src/main/java/com/smartship/api/ai/tools/WarehouseTools.java** - Warehouse query tools ✅
-20. **query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java** - Session memory ✅
-21. **kubernetes/infrastructure/ollama.yaml** - Ollama StatefulSet + Service ✅
+18. **query-api/src/main/java/com/smartship/api/ai/tools/VehicleTools.java** - Vehicle query tools ✅
+19. **query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java** - Customer query tools ✅
+20. **query-api/src/main/java/com/smartship/api/ai/tools/WarehouseTools.java** - Warehouse query tools ✅
+21. **query-api/src/main/java/com/smartship/api/ai/tools/PerformanceTools.java** - Performance query tools ✅
+22. **query-api/src/main/java/com/smartship/api/ai/tools/ReferenceDataTools.java** - Reference data tools ✅
+23. **query-api/src/main/java/com/smartship/api/ai/memory/SessionChatMemoryProvider.java** - Session memory ✅
+24. **query-api/src/main/java/com/smartship/api/services/ToolOperationsService.java** - Shared business logic ✅
+25. **query-api/src/main/java/com/smartship/api/model/tools/*.java** - 15 result DTO records ✅
+26. **kubernetes/infrastructure/ollama.yaml** - Ollama StatefulSet + Service ✅
 
-### Phase 7 (Additional Tools & Web UI)
-22. **query-api/src/main/java/com/smartship/api/ai/tools/VehicleTools.java** - Vehicle query tools
-23. **query-api/src/main/java/com/smartship/api/ai/tools/PerformanceTools.java** - Performance query tools
-24. **query-api/src/main/java/com/smartship/api/ai/tools/ReferenceDataTools.java** - Reference data tools
-25. **query-api/src/main/resources/META-INF/resources/index.html** - Chat web UI
-26. **query-api/src/main/resources/META-INF/resources/chat.js** - Chat UI JavaScript
-27. **query-api/src/main/resources/META-INF/resources/styles.css** - Chat UI styling
+### Phase 7 (MCP Server & Web Dashboard - COMPLETED)
+27. **query-api/src/main/java/com/smartship/api/mcp/ShipmentMcpTools.java** - MCP shipment tools ✅
+28. **query-api/src/main/java/com/smartship/api/mcp/VehicleMcpTools.java** - MCP vehicle tools ✅
+29. **query-api/src/main/java/com/smartship/api/mcp/CustomerMcpTools.java** - MCP customer tools ✅
+30. **query-api/src/main/java/com/smartship/api/mcp/OrderMcpTools.java** - MCP order tools ✅
+31. **query-api/src/main/java/com/smartship/api/mcp/WarehouseMcpTools.java** - MCP warehouse tools ✅
+32. **query-api/src/main/java/com/smartship/api/mcp/ReferenceMcpTools.java** - MCP reference data tools ✅
+33. **query-api/src/main/resources/META-INF/resources/index.html** - Web dashboard ✅
+34. **query-api/src/main/resources/META-INF/resources/styles.css** - Dashboard styling ✅
+35. **query-api/src/main/resources/META-INF/resources/dashboard.js** - Dashboard auto-refresh logic ✅
+36. **query-api/src/main/resources/META-INF/resources/chat.js** - Chat UI with LLM health ✅
 
-### Phase 8 (Guardrails, Streaming & Observability)
-28. **query-api/src/main/java/com/smartship/api/ai/guardrails/LogisticsInScopeGuard.java** - Input guardrail
-29. **query-api/src/main/java/com/smartship/api/ai/guardrails/DataFactualityGuard.java** - Output guardrail
-30. **query-api/src/main/java/com/smartship/api/ai/guardrails/ResponseFormatGuard.java** - Format guardrail
-31. **query-api/src/main/java/com/smartship/api/ai/WebSocketChatEndpoint.java** - WebSocket streaming
-32. **query-api/src/main/java/com/smartship/api/ai/tools/AnalyticsTools.java** - Cross-source analytics
-33. **query-api/src/main/java/com/smartship/api/ai/observability/ChatAuditObserver.java** - Audit logging
-34. **docs/demo-conversations.md** - Demo conversation examples
+### Phase 8 (Guardrails, Streaming & Observability - PENDING)
+37. **query-api/src/main/java/com/smartship/api/ai/guardrails/LogisticsInScopeGuard.java** - Input guardrail
+38. **query-api/src/main/java/com/smartship/api/ai/guardrails/DataFactualityGuard.java** - Output guardrail
+39. **query-api/src/main/java/com/smartship/api/ai/guardrails/ResponseFormatGuard.java** - Format guardrail
+40. **query-api/src/main/java/com/smartship/api/ai/WebSocketChatEndpoint.java** - WebSocket streaming
+41. **query-api/src/main/java/com/smartship/api/ai/tools/AnalyticsTools.java** - Cross-source analytics
+42. **query-api/src/main/java/com/smartship/api/ai/observability/ChatAuditObserver.java** - Audit logging
+43. **docs/demo-conversations.md** - Demo conversation examples
 
 ## Next Steps
 
@@ -1138,16 +1260,17 @@ Phase 6 established the foundation with ShipmentTools (3 methods), CustomerTools
 ✅ **Phase 3 COMPLETED** - All 6 Kafka Streams state stores consuming 3 topics.
 ✅ **Phase 4 COMPLETED** - Full LLM query capability with 9 state stores, PostgreSQL integration, and hybrid queries.
 ✅ **Phase 5 COMPLETED** - Native image builds, comprehensive testing, and production hardening.
-✅ **Phase 6 COMPLETED** - LLM chatbot with LangChain4j, Ollama, and multi-provider support.
+✅ **Phase 6 COMPLETED** - LLM chatbot with LangChain4j (6 tool classes, 18 @Tool methods), ToolOperationsService, multi-provider support.
+✅ **Phase 7 COMPLETED** - MCP server (6 tool classes, 18 tools) and web dashboard with live statistics and AI chat.
 
 **To deploy (JVM mode):**
 ```bash
 cd /home/tcooper/repos/redhat/realtime-context-demo
 
-# 1. Start minikube
-minikube start --cpus=4 --memory=12288 --disk-size=50g
+# 1. Start minikube (with Ollama support)
+minikube start --cpus=6 --memory=16384 --disk-size=80g
 
-# 2. Deploy infrastructure
+# 2. Deploy infrastructure (includes Ollama)
 python3 scripts/01-setup-infra.py
 
 # 3. Build all modules (JVM mode)
@@ -1158,6 +1281,10 @@ python3 scripts/03-deploy-apps.py
 
 # 5. Validate deployment (tests all 9 state stores, reference data, and hybrid queries)
 python3 scripts/04-validate.py
+
+# 6. Access web dashboard
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+open http://localhost:8080/
 ```
 
 **To build native image:**
@@ -1167,8 +1294,7 @@ python3 scripts/02-build-all.py --native
 ```
 
 **Future Implementation:**
-- Phase 7 will add additional LLM tool classes (VehicleTools, PerformanceTools, ReferenceDataTools) and web UI for demos
-- Phase 8 will add guardrails, WebSocket streaming, analytics tools, and observability
+- Phase 8 will add input/output guardrails, WebSocket streaming, analytics tools, and audit observability
 
 ## Phase 1 Success Metrics (All Achieved)
 
@@ -1293,3 +1419,86 @@ python3 scripts/02-build-all.py --native
 - `scripts/02-build-all.py` supports `--native` flag for native image builds
 - `query-api.yaml` includes native image resource configurations
 - Native profile in `query-api/pom.xml` with Java 21 for GraalVM compatibility
+
+## Phase 6 Success Metrics (All Achieved)
+
+✅ **LangChain4j Integration:**
+- Quarkus LangChain4j 1.5.0.CR2 successfully integrated
+- 6 tool classes with 18 @Tool methods operational
+- Multi-provider support: Ollama, OpenAI, Anthropic
+- Session-based chat memory with 20-message window
+- Health check endpoint reporting LLM provider status
+
+✅ **ToolOperationsService (Shared Business Logic):**
+- Central `@ApplicationScoped` service with 16 operations
+- ID normalization handling various input formats
+- 30-second timeout for async operations
+- ToolOperationException for consistent error handling
+- Dependencies injected: KafkaStreamsQueryService, PostgresQueryService, QueryOrchestrationService
+
+✅ **Result DTO Records:**
+- 15 result record classes in `model/tools/` package
+- Immutable, compact data transfer objects
+- ToolError record with factory methods for error handling
+- Used by both LangChain4j and MCP tools (no duplication)
+
+✅ **Chat Endpoints:**
+- `POST /api/chat` - Chat with AI assistant
+- `GET /api/chat/health` - LLM provider health check
+- `GET /api/chat/sessions/count` - Active session count
+- `DELETE /api/chat/sessions/{sessionId}` - Clear specific session
+
+✅ **Key Files Created (Phase 6):**
+- `query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java`
+- `query-api/src/main/java/com/smartship/api/ai/ChatResource.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/*.java` (6 tool classes)
+- `query-api/src/main/java/com/smartship/api/services/ToolOperationsService.java`
+- `query-api/src/main/java/com/smartship/api/model/tools/*.java` (15 result records)
+- `kubernetes/infrastructure/ollama.yaml`
+
+## Phase 7 Success Metrics (All Achieved)
+
+✅ **MCP Server Implementation:**
+- Quarkus MCP Server 1.8.0 with Streamable HTTP transport
+- `/mcp` endpoint responding to JSON-RPC 2.0 requests
+- 6 MCP tool classes with 18 curated tools
+- Protocol version 2025-03-26 compliant
+- tools/list and tools/call methods operational
+
+✅ **MCP Tool Classes:**
+| Class | Tools Count | Domain |
+|-------|-------------|--------|
+| ShipmentMcpTools | 4 | Shipment status, late tracking |
+| VehicleMcpTools | 3 | Vehicle telemetry, fleet status |
+| CustomerMcpTools | 3 | Customer overview, SLA compliance |
+| OrderMcpTools | 3 | Order state, SLA risk tracking |
+| WarehouseMcpTools | 3 | Warehouse operations, performance |
+| ReferenceMcpTools | 2 | Available drivers, delivery routes |
+
+✅ **Shared Architecture:**
+- MCP tools delegate to ToolOperationsService (same as LangChain4j)
+- Consistent behavior between internal chatbot and external MCP protocol
+- Same result DTOs used by both tool systems
+- No code duplication between tool implementations
+
+✅ **Web Dashboard:**
+- 6 dashboard cards: AI Assistant, Shipments, Fleet, Warehouses, Orders, Alerts
+- 30-second auto-refresh with parallel API fetches
+- CSS Grid responsive layout (3/2/1 columns by viewport)
+- LLM health status indicator with color coding
+- Chat interface with session persistence (localStorage)
+- Thinking timer showing elapsed seconds during LLM processing
+
+✅ **Key Files Created (Phase 7):**
+- `query-api/src/main/java/com/smartship/api/mcp/*.java` (6 MCP tool classes)
+- `query-api/src/main/resources/META-INF/resources/index.html`
+- `query-api/src/main/resources/META-INF/resources/styles.css`
+- `query-api/src/main/resources/META-INF/resources/dashboard.js`
+- `query-api/src/main/resources/META-INF/resources/chat.js`
+
+✅ **MCP Configuration:**
+```properties
+quarkus.mcp.server.server-info.name=smartship-logistics
+quarkus.mcp.server.server-info.version=1.0.0
+quarkus.mcp.server.http.root-path=/mcp
+```

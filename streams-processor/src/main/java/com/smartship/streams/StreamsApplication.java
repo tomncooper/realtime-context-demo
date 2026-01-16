@@ -23,7 +23,6 @@ public class StreamsApplication {
     public static void main(String[] args) {
         LOG.info("=".repeat(60));
         LOG.info("SmartShip Logistics - Kafka Streams Processor");
-        LOG.info("Phase 1: Active shipments by status");
         LOG.info("=".repeat(60));
 
         // Build topology

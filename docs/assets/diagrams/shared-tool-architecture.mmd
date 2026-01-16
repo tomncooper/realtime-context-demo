@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph service["ToolOperationsService"]
+        direction LR
+        methods["18 business logic methods"]
+        normalize["ID normalization"]
+        timeout["Timeout & limit management"]
+        errors["Consistent error handling"]
+    end
+
+    service --> lc4j
+    service --> mcp
+
+    subgraph lc4j["LangChain4j Tools"]
+        direction TB
+        lc4j_ann["@Tool annotation"]
+        lc4j_ret["Returns JSON strings"]
+        lc4j_cls["6 tool classes"]
+    end
+
+    subgraph mcp["MCP Tools"]
+        direction TB
+        mcp_ann["@Singleton"]
+        mcp_ret["Direct object returns"]
+        mcp_cls["6 tool classes"]
+    end
+
+    lc4j --> dtos
+    mcp --> dtos
+
+    subgraph dtos["Shared DTOs"]
+        direction LR
+        dto1["ShipmentStatusResult"]
+        dto2["VehicleStateResult"]
+        dto3["CustomerShipmentStatsResult"]
+        dto4["ToolError"]
+        dto5["...16 result types"]
+    end

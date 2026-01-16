@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.*;
 
 /**
- * Vehicle telemetry generator for Phase 2.
+ * Vehicle telemetry generator.
  * Generates 20-30 events/second across 50 vehicles.
  * Each vehicle updates every 30-60 seconds.
  */

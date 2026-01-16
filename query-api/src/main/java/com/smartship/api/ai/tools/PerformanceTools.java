@@ -3,6 +3,8 @@ package com.smartship.api.ai.tools;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartship.api.KafkaStreamsQueryService;
+import com.smartship.api.model.tools.WarehousePerformanceResult;
+import com.smartship.api.services.ToolOperationsService;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -25,6 +27,9 @@ public class PerformanceTools {
     private static final Logger LOG = Logger.getLogger(PerformanceTools.class);
 
     @Inject
+    ToolOperationsService operations;
+
+    @Inject
     KafkaStreamsQueryService streamsQueryService;
 
     @Inject
@@ -41,29 +46,12 @@ public class PerformanceTools {
             return "{\"error\": \"Warehouse ID is required. Format: WH-XXX (e.g., WH-RTM)\"}";
         }
 
-        String normalizedId = normalizeWarehouseId(warehouseId);
-
         try {
-            List<Map<String, Object>> performance = streamsQueryService.getHourlyPerformance(normalizedId);
-
-            if (performance == null || performance.isEmpty()) {
-                return toJson(Map.of(
-                    "message", "No hourly performance data available for warehouse " + normalizedId + ". Data may still be accumulating.",
-                    "warehouse_id", normalizedId,
-                    "windows", 0
-                ));
-            }
-
-            return toJson(Map.of(
-                "warehouse_id", normalizedId,
-                "windows", performance.size(),
-                "hourly_performance", performance,
-                "note", "Each window represents a 1-hour period with delivery statistics"
-            ));
-
+            WarehousePerformanceResult result = operations.getWarehousePerformance(warehouseId);
+            return toJson(result);
         } catch (Exception e) {
-            LOG.errorf(e, "Error getting warehouse performance for: %s", normalizedId);
-            return "{\"error\": \"Failed to retrieve performance for warehouse " + normalizedId + ": " + e.getMessage() + "\"}";
+            LOG.errorf(e, "Error getting warehouse performance for: %s", warehouseId);
+            return "{\"error\": \"Failed to retrieve performance for warehouse " + warehouseId + ": " + e.getMessage() + "\"}";
         }
     }
 
@@ -78,7 +66,7 @@ public class PerformanceTools {
             return "{\"error\": \"Warehouse ID is required. Format: WH-XXX (e.g., WH-RTM)\"}";
         }
 
-        String normalizedId = normalizeWarehouseId(warehouseId);
+        String normalizedId = operations.normalizeWarehouseId(warehouseId);
 
         try {
             List<Map<String, Object>> metrics = streamsQueryService.getWarehouseMetrics(normalizedId);
@@ -132,14 +120,6 @@ public class PerformanceTools {
             LOG.errorf(e, "Error getting all performance metrics");
             return "{\"error\": \"Failed to retrieve performance metrics: " + e.getMessage() + "\"}";
         }
-    }
-
-    private String normalizeWarehouseId(String warehouseId) {
-        String normalized = warehouseId.toUpperCase().trim();
-        if (!normalized.startsWith("WH-")) {
-            normalized = "WH-" + normalized;
-        }
-        return normalized;
     }
 
     private String toJson(Object obj) {

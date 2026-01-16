@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 /**
  * Service for orchestrating hybrid queries that combine real-time Kafka Streams data
  * with PostgreSQL reference data.
- * Phase 4: Provides enriched data for LLM query capability.
+ * Provides enriched data for LLM query capability.
  */
 @ApplicationScoped
 public class QueryOrchestrationService {

@@ -43,7 +43,6 @@ class QueryResourceTest {
             .then()
             .statusCode(200)
             .body("status", equalTo("UP"))
-            .body("phase", equalTo("4"))
             .body("timestamp", notNullValue());
     }
 
@@ -177,7 +176,7 @@ class QueryResourceTest {
     }
 
     // ==========================================
-    // Order Endpoints (Phase 4)
+    // Order Endpoints
     // ==========================================
 
     @Test

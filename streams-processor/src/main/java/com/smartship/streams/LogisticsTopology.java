@@ -23,7 +23,7 @@ import java.time.Duration;
 
 /**
  * Kafka Streams topology for SmartShip logistics.
- * Phase 3: All 6 state stores consuming 4 topics.
+ * Maintains 9 state stores consuming 4 topics.
  */
 public class LogisticsTopology {
 
@@ -43,7 +43,7 @@ public class LogisticsTopology {
     public static final String LATE_SHIPMENTS_STORE = "late-shipments";
     public static final String HOURLY_PERFORMANCE_STORE = "hourly-delivery-performance";
 
-    // State store names - Orders (Phase 4)
+    // State store names - Orders
     public static final String ORDER_STATE_STORE = "order-current-state";
     public static final String ORDERS_BY_CUSTOMER_STORE = "orders-by-customer";
     public static final String ORDER_SLA_TRACKING_STORE = "order-sla-tracking";
@@ -64,7 +64,7 @@ public class LogisticsTopology {
      * @return Configured topology
      */
     public static Topology build() {
-        LOG.info("Building Kafka Streams topology for Phase 4 - 9 state stores");
+        LOG.info("Building Kafka Streams topology with 9 state stores");
 
         StreamsBuilder builder = new StreamsBuilder();
 
@@ -139,7 +139,7 @@ public class LogisticsTopology {
         buildWarehouseMetricsStore(warehouseStream, warehouseOperationSerde, warehouseMetricsSerde);
 
         // ===========================================
-        // Stream from order.status topic (Phase 4)
+        // Stream from order.status topic
         // ===========================================
         KStream<String, OrderStatus> orderStream = builder.stream(
             ORDER_STATUS_TOPIC,
@@ -367,7 +367,7 @@ public class LogisticsTopology {
     }
 
     // ===========================================
-    // Order State Stores (Phase 4)
+    // Order State Stores
     // ===========================================
 
     /**

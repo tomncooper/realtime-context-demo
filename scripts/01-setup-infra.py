@@ -4,7 +4,8 @@ import argparse
 import sys
 from common import (
     kubectl, wait_for_condition, wait_for_statefulset_ready,
-    KAFKA_CLUSTER_NAME, ensure_ollama_models, upload_ollama_models_to_minikube
+    KAFKA_CLUSTER_NAME, ensure_ollama_models, upload_ollama_models_to_minikube,
+    prepull_ollama_image
 )
 
 
@@ -56,6 +57,9 @@ def deploy_ollama_with_models(models: list):
         print("ERROR: Failed to upload models to minikube")
         return False
 
+    # Pre-pull the Ollama container image to avoid long download during pod startup
+    prepull_ollama_image()
+
     # Deploy Ollama with hostPath variant
     print("\n=== Deploying Ollama (hostPath mode) ===")
     kubectl('apply', '-f', 'kubernetes/infrastructure/ollama-hostpath.yaml')
@@ -72,6 +76,9 @@ def deploy_ollama_with_models(models: list):
 
 def deploy_ollama_standard():
     """Deploy Ollama with standard PVC (downloads model in-cluster)."""
+    # Pre-pull the Ollama container image to avoid long download during pod startup
+    prepull_ollama_image()
+
     print("\n=== Deploying Ollama (PVC mode - will download model in-cluster) ===")
     kubectl('apply', '-f', 'kubernetes/infrastructure/ollama.yaml')
 

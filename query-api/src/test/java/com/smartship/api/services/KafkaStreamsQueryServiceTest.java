@@ -250,7 +250,7 @@ class KafkaStreamsQueryServiceTest {
     }
 
     // ==========================================
-    // Order State Store Tests (Phase 4)
+    // Order State Store Tests
     // ==========================================
 
     @Test

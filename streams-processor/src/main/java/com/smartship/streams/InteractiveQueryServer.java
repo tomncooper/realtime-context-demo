@@ -26,7 +26,7 @@ import java.util.*;
 
 /**
  * HTTP server for Interactive Queries on Kafka Streams state stores.
- * Phase 4: Supports all 9 state stores including order state stores.
+ * Supports all 9 state stores including order state stores.
  */
 public class InteractiveQueryServer {
 
@@ -66,7 +66,7 @@ public class InteractiveQueryServer {
         server.createContext("/state/warehouse-realtime-metrics", this::handleWarehouseMetrics);
         server.createContext("/state/hourly-delivery-performance", this::handleHourlyPerformance);
 
-        // Order state store endpoints (Phase 4)
+        // Order state store endpoints
         server.createContext("/state/order-current-state", this::handleOrderCurrentState);
         server.createContext("/state/orders-by-customer", this::handleOrdersByCustomer);
         server.createContext("/state/order-sla-tracking", this::handleOrderSLATracking);
@@ -516,7 +516,7 @@ public class InteractiveQueryServer {
     }
 
     // ===========================================
-    // State Store 7: order-current-state (Phase 4)
+    // State Store 7: order-current-state
     // ===========================================
 
     private void handleOrderCurrentState(HttpExchange exchange) throws IOException {
@@ -565,7 +565,7 @@ public class InteractiveQueryServer {
     }
 
     // ===========================================
-    // State Store 8: orders-by-customer (Phase 4)
+    // State Store 8: orders-by-customer
     // ===========================================
 
     private void handleOrdersByCustomer(HttpExchange exchange) throws IOException {
@@ -614,7 +614,7 @@ public class InteractiveQueryServer {
     }
 
     // ===========================================
-    // State Store 9: order-sla-tracking (Phase 4)
+    // State Store 9: order-sla-tracking
     // ===========================================
 
     private void handleOrderSLATracking(HttpExchange exchange) throws IOException {

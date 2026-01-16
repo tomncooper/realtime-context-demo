@@ -11,7 +11,7 @@ This means you should automatically use the Context7 MCP tools to resolve librar
 
 SmartShip Logistics is a real-time event streaming demonstration showcasing Kafka Streams, materialized views, and an LLM-queryable API for a regional logistics and fulfillment company. The project is implemented as a Maven multi-module monorepo deployed on Kubernetes (minikube).
 
-**Current Status:** Phase 1-5 ✅ COMPLETED | Phase 6 ✅ COMPLETED (LLM chatbot with LangChain4j + Ollama) | Phase 7-8 Pending
+**Current Status:** Phase 1-5 ✅ COMPLETED | Phase 6 ✅ COMPLETED (LangChain4j + ToolOperationsService) | Phase 7 ✅ COMPLETED (MCP Server + Web Dashboard) | Phase 8 Pending
 
 **Detailed Walkthrough:** See `docs/index.md` for in-depth documentation with architecture diagrams and query flow examples.
 
@@ -147,8 +147,8 @@ The Query API includes an LLM chatbot for natural language queries:
 Query-API
     ├── ChatResource → /api/chat endpoint
     ├── LogisticsAssistant → @RegisterAiService AI interface
-    ├── ShipmentTools → 3 @Tool methods for shipment queries
-    ├── CustomerTools → 2 @Tool methods for customer queries
+    ├── ToolOperationsService → Shared business logic for all tools
+    ├── ai/tools/ → LangChain4j tools (6 classes)
     └── SessionChatMemoryProvider → In-memory session storage
 ```
 
@@ -172,9 +172,93 @@ Query-API
 **Key Files (Phase 6):**
 - `query-api/src/main/java/com/smartship/api/ai/LogisticsAssistant.java`
 - `query-api/src/main/java/com/smartship/api/ai/ChatResource.java`
-- `query-api/src/main/java/com/smartship/api/ai/tools/ShipmentTools.java`
-- `query-api/src/main/java/com/smartship/api/ai/tools/CustomerTools.java`
+- `query-api/src/main/java/com/smartship/api/services/ToolOperationsService.java`
+- `query-api/src/main/java/com/smartship/api/ai/tools/*.java` (6 LangChain4j tool classes)
 - `kubernetes/infrastructure/ollama.yaml`
+
+### MCP Server for External AI Agents
+The Query API exposes an MCP (Model Context Protocol) server for external AI agents to query logistics data:
+
+```
+Query-API
+    ├── /mcp → Streamable HTTP transport endpoint
+    ├── mcp/ → MCP tool classes (6 classes, 18 tools)
+    ├── ToolOperationsService → Shared business logic
+    └── model/tools/ → Shared DTO records for tool responses
+```
+
+**MCP Endpoint:** `/mcp` (Streamable HTTP transport, protocol version 2025-03-26)
+
+**Available Tools (18 curated):**
+
+| Category | Tools | Description |
+|----------|-------|-------------|
+| Shipments (4) | `getShipmentStatusCounts`, `getLateShipments`, `getShipmentByStatus`, `getCustomerShipmentStats` | Shipment status counts, late shipments, customer stats |
+| Vehicles (3) | `getVehicleState`, `getAllVehicleStates`, `getFleetUtilization` | Real-time telemetry, fleet overview, utilization metrics |
+| Customers (3) | `getCustomerOverview`, `getCustomerSlaCompliance`, `findCustomersByName` | Customer profiles, SLA compliance, search |
+| Orders (3) | `getOrdersAtSlaRisk`, `getOrderState`, `getCustomerOrderStats` | SLA risk tracking, order state, customer order stats |
+| Warehouses (3) | `getWarehouseList`, `getWarehouseStatus`, `getWarehousePerformance` | Warehouse list, operational status, performance metrics |
+| Reference (2) | `getAvailableDrivers`, `getRoutesByOrigin` | Available drivers, delivery routes |
+
+**Configuration (application.properties):**
+```properties
+quarkus.mcp.server.server-info.name=smartship-logistics
+quarkus.mcp.server.server-info.version=1.0.0
+quarkus.mcp.server.http.root-path=/mcp
+```
+
+**Testing MCP Endpoint:**
+
+The MCP Streamable HTTP transport requires:
+1. `Accept: application/json, text/event-stream` header
+2. Session initialization before calling tools
+3. `Mcp-Session-Id` header for subsequent requests
+
+```bash
+kubectl port-forward svc/query-api 8080:8080 -n smartship &
+
+# Step 1: Initialize session (note the Accept header and -i to capture session ID)
+curl -i -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc": "2.0", "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "curl", "version": "1.0"}}, "id": 1}'
+
+# Response includes: Mcp-Session-Id: <session-id>
+# Use this session ID in subsequent requests
+
+# Step 2: Send initialized notification
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc": "2.0", "method": "notifications/initialized"}'
+
+# Step 3: List available tools
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 2}' | jq
+
+# Step 4: Call a tool
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {"name": "shipment_status_counts", "arguments": {}},
+    "id": 3
+  }' | jq
+```
+
+**Key Files (MCP):**
+- `query-api/src/main/java/com/smartship/api/mcp/*.java` (6 MCP tool classes)
+- `query-api/src/main/java/com/smartship/api/model/tools/*.java` (shared DTOs)
+- `query-api/src/main/java/com/smartship/api/services/ToolOperationsService.java`
+
+**Architecture Note:** Both LangChain4j tools (for internal LLM) and MCP tools (for external agents) share the same `ToolOperationsService` for business logic, ensuring consistent behavior and avoiding code duplication.
 
 ### Web UI Dashboard
 The Query API includes a built-in web dashboard served as static files by Quarkus:
@@ -428,7 +512,7 @@ curl http://localhost:8080/api/health | jq
 open http://localhost:8080/swagger-ui
 ```
 
-**Endpoint groups:** `/api/shipments/*`, `/api/vehicles/*`, `/api/customers/*`, `/api/warehouses/*`, `/api/performance/*`, `/api/orders/*`, `/api/reference/*`, `/api/hybrid/*`, `/api/chat/*`
+**Endpoint groups:** `/api/shipments/*`, `/api/vehicles/*`, `/api/customers/*`, `/api/warehouses/*`, `/api/performance/*`, `/api/orders/*`, `/api/reference/*`, `/api/hybrid/*`, `/api/chat/*`, `/mcp` (MCP server)
 
 ### ID Formats (Critical for Queries)
 Use these exact formats when querying:
@@ -489,6 +573,7 @@ curl http://localhost:8080/api/chat/sessions/count
 - **Apicurio Registry:** 3.1.4
 - **Quarkus:** 3.30.1
 - **Quarkus LangChain4j:** 1.5.0.CR2 (LLM integration)
+- **Quarkus MCP Server:** 1.8.0 (MCP protocol for external AI agents)
 - **PostgreSQL:** 15 (postgres:15-alpine)
 - **SLF4J:** 2.0.17
 - **Logback:** 1.5.12
@@ -547,8 +632,9 @@ When implementing additional topics and generators:
 | 3 | ✅ | 6 state stores (4 KeyValue + 2 Windowed), 14 REST endpoints |
 | 4 | ✅ | 9 state stores, PostgreSQL integration, 44+ endpoints, hybrid queries |
 | 5 | ✅ | Native image (<100ms startup), tests, exception handling |
-| 6 | ✅ | LLM chatbot with LangChain4j 1.5.0.CR2, Ollama, multi-provider support |
-| 7-8 | Pending | Advanced LLM features: guardrails, streaming, observability |
+| 6 | ✅ | LLM chatbot: 6 LangChain4j tool classes, ToolOperationsService, multi-provider |
+| 7 | ✅ | MCP server (18 tools), web dashboard with live stats and AI chat |
+| 8 | Pending | Guardrails, WebSocket streaming, analytics tools, observability |
 
 See `design/implementation-plan.md` for detailed phase breakdown.
 

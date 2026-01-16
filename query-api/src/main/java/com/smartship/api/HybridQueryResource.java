@@ -15,7 +15,7 @@ import java.util.Map;
 
 /**
  * REST API for hybrid queries combining Kafka Streams and PostgreSQL data.
- * Phase 4: Provides enriched, multi-source query capability for LLM integration.
+ * Provides enriched, multi-source query capability for LLM integration.
  */
 @Path("/api/hybrid")
 @Produces(MediaType.APPLICATION_JSON)

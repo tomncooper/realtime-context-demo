@@ -14,7 +14,7 @@ import java.util.Map;
 
 /**
  * REST API for querying logistics data from Kafka Streams state stores.
- * Phase 4: Supports all 9 state stores including order state stores.
+ * Supports all 9 state stores including order state stores.
  */
 @Path("/api")
 @Produces(MediaType.APPLICATION_JSON)
@@ -404,7 +404,7 @@ public class QueryResource {
     }
 
     // ===========================================
-    // Order State Endpoints (Phase 4)
+    // Order State Endpoints
     // ===========================================
 
     @GET
@@ -467,7 +467,7 @@ public class QueryResource {
     }
 
     // ===========================================
-    // Customer Order Stats Endpoints (Phase 4)
+    // Customer Order Stats Endpoints
     // ===========================================
 
     @GET
@@ -530,7 +530,7 @@ public class QueryResource {
     }
 
     // ===========================================
-    // Order SLA Tracking Endpoints (Phase 4)
+    // Order SLA Tracking Endpoints
     // ===========================================
 
     @GET
@@ -605,7 +605,6 @@ public class QueryResource {
         return Response.ok(Map.of(
             "status", "UP",
             "service", "smartship-query-api",
-            "phase", "4",
             "state_stores", List.of(
                 "active-shipments-by-status",
                 "vehicle-current-state",

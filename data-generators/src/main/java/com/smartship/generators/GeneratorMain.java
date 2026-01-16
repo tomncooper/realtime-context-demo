@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Main entry point for all Phase 2 data generators.
+ * Main entry point for all data generators.
  * Runs all generators in a single JVM for simplified deployment.
  */
 public class GeneratorMain {
@@ -14,7 +14,7 @@ public class GeneratorMain {
 
     public static void main(String[] args) {
         LOG.info("=".repeat(60));
-        LOG.info("SmartShip Logistics - Phase 2 Data Generators");
+        LOG.info("SmartShip Logistics - Data Generators");
         LOG.info("=".repeat(60));
 
         // Load reference data from PostgreSQL

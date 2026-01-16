@@ -2,19 +2,19 @@ package com.smartship.api.ai.tools;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.smartship.api.KafkaStreamsQueryService;
+import com.smartship.api.model.tools.CustomerShipmentStatsResult;
+import com.smartship.api.model.tools.LateShipmentsResult;
+import com.smartship.api.model.tools.ShipmentStatusResult;
+import com.smartship.api.services.ToolOperationsService;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.List;
-import java.util.Map;
-
 /**
  * LangChain4j tools for querying shipment data from Kafka Streams state stores.
  *
- * <p>These tools wrap the KafkaStreamsQueryService methods and return JSON strings
+ * <p>These tools wrap the ToolOperationsService methods and return JSON strings
  * that the LLM can understand and use to answer user questions.</p>
  */
 @ApplicationScoped
@@ -23,7 +23,7 @@ public class ShipmentTools {
     private static final Logger LOG = Logger.getLogger(ShipmentTools.class);
 
     @Inject
-    KafkaStreamsQueryService streamsQueryService;
+    ToolOperationsService operations;
 
     @Inject
     ObjectMapper objectMapper;
@@ -36,26 +36,13 @@ public class ShipmentTools {
     public String getShipmentStatusCounts() {
         LOG.info("Tool called: getShipmentStatusCounts");
         try {
-            Map<String, Object> counts = streamsQueryService.getAllStatusCounts();
-
-            if (counts == null || counts.isEmpty()) {
-                return "{\"message\": \"No shipment data available yet. The system may still be initializing.\"}";
-            }
-
-            return toJson(Map.of(
-                "status_counts", counts,
-                "total_shipments", counts.values().stream()
-                    .filter(v -> v instanceof Number)
-                    .mapToLong(v -> ((Number) v).longValue())
-                    .sum()
-            ));
+            ShipmentStatusResult result = operations.getShipmentStatusCounts();
+            return toJson(result);
         } catch (Exception e) {
             LOG.errorf(e, "Error getting shipment status counts");
             return "{\"error\": \"Failed to retrieve shipment status counts: " + e.getMessage() + "\"}";
         }
     }
-
-    private static final int MAX_LATE_SHIPMENTS_TO_RETURN = 10;
 
     /**
      * Get shipments that are currently late (past their expected delivery time).
@@ -65,31 +52,8 @@ public class ShipmentTools {
     public String getLateShipments() {
         LOG.info("Tool called: getLateShipments");
         try {
-            List<Map<String, Object>> lateShipments = streamsQueryService.getAllLateShipments();
-
-            if (lateShipments == null || lateShipments.isEmpty()) {
-                return "{\"message\": \"No late shipments found. All shipments are on track.\", \"count\": 0}";
-            }
-
-            int totalCount = lateShipments.size();
-
-            // Return only the first N shipments to avoid overwhelming the LLM
-            List<Map<String, Object>> topLateShipments = lateShipments.stream()
-                .limit(MAX_LATE_SHIPMENTS_TO_RETURN)
-                .toList();
-
-            Map<String, Object> response = new java.util.LinkedHashMap<>();
-            response.put("total_late_shipments", totalCount);
-            response.put("showing", Math.min(MAX_LATE_SHIPMENTS_TO_RETURN, totalCount));
-            response.put("summary", String.format("There are %d shipments currently delayed.", totalCount));
-            response.put("late_shipments", topLateShipments);
-
-            if (totalCount > MAX_LATE_SHIPMENTS_TO_RETURN) {
-                response.put("note", String.format("Showing top %d of %d late shipments. Use the API directly for full list.",
-                    MAX_LATE_SHIPMENTS_TO_RETURN, totalCount));
-            }
-
-            return toJson(response);
+            LateShipmentsResult result = operations.getLateShipments();
+            return toJson(result);
         } catch (Exception e) {
             LOG.errorf(e, "Error getting late shipments");
             return "{\"error\": \"Failed to retrieve late shipments: " + e.getMessage() + "\"}";
@@ -108,24 +72,12 @@ public class ShipmentTools {
             return "{\"error\": \"Customer ID is required. Format: CUST-XXXX (e.g., CUST-0001)\"}";
         }
 
-        // Normalize customer ID format
-        String normalizedId = customerId.toUpperCase().trim();
-        if (!normalizedId.startsWith("CUST-")) {
-            normalizedId = "CUST-" + normalizedId;
-        }
-
         try {
-            Map<String, Object> stats = streamsQueryService.getCustomerShipmentStats(normalizedId);
-
-            if (stats == null || stats.isEmpty()) {
-                return "{\"message\": \"No shipment data found for customer " + normalizedId + ". The customer may not have any shipments yet.\"}";
-            }
-
-            stats.put("customer_id", normalizedId);
-            return toJson(stats);
+            CustomerShipmentStatsResult result = operations.getCustomerShipmentStats(customerId);
+            return toJson(result);
         } catch (Exception e) {
-            LOG.errorf(e, "Error getting customer shipment stats for: %s", normalizedId);
-            return "{\"error\": \"Failed to retrieve shipment stats for customer " + normalizedId + ": " + e.getMessage() + "\"}";
+            LOG.errorf(e, "Error getting customer shipment stats for: %s", customerId);
+            return "{\"error\": \"Failed to retrieve shipment stats for customer " + customerId + ": " + e.getMessage() + "\"}";
         }
     }
 
