@@ -56,6 +56,9 @@ This script will deploy a Strimzi-managed Kafka cluster, Apicurio Registry, Post
 # Optional: Set container runtime (default: podman)
 export CONTAINER_RUNTIME=podman  # or docker
 
+# Export target image platform
+export TARGET_ARCH=amd64 # or arm64
+
 # Build and load images to minikube
 python3 scripts/02-build-all.py --load-minikube
 
