@@ -350,35 +350,63 @@ def upload_ollama_models_to_minikube() -> bool:
 def prepull_ollama_image() -> bool:
     """Pre-pull the Ollama container image into minikube.
 
-    This avoids the 10+ minute download during pod startup by pulling
-    the 3.3GB image ahead of time.
+    Always caches the image in the local container registry first, then loads
+    into minikube via tar. This persists the image across minikube delete/recreate
+    cycles, avoiding repeated downloads from Docker Hub.
     """
     image = "ollama/ollama:latest"
     print(f"\n=== Pre-pulling Ollama image ({image}) ===")
-    print("This may take several minutes on first run (image is ~3.3GB)...")
 
-    # Check if image is already present in minikube
+    # Step 1: Check if already in minikube
     result = subprocess.run(
         ['minikube', 'image', 'ls'],
-        capture_output=True,
-        text=True,
-        check=False
+        capture_output=True, text=True, check=False
     )
-
     if result.returncode == 0 and 'ollama/ollama' in result.stdout:
         print(f"✓ Image {image} already present in minikube")
         return True
 
-    # Pull the image directly into minikube
-    print(f"Pulling {image} into minikube...")
-    result = subprocess.run(
-        ['minikube', 'image', 'pull', image],
-        check=False
-    )
+    # Step 2: Check if image exists in local container registry
+    if CONTAINER_RUNTIME == 'podman':
+        check_cmd = [CONTAINER_RUNTIME, 'image', 'exists', image]
+    else:
+        check_cmd = [CONTAINER_RUNTIME, 'image', 'inspect', image]
 
-    if result.returncode != 0:
-        print(f"Warning: Failed to pre-pull {image}, will pull during pod startup")
+    result = subprocess.run(check_cmd, capture_output=True, check=False)
+    image_exists_locally = (result.returncode == 0)
+
+    # Step 3: If not in local registry, pull it there first (caches for future)
+    if not image_exists_locally:
+        print(f"Image {image} not found in local {CONTAINER_RUNTIME} registry")
+        print(f"Pulling {image} to local registry (this may take several minutes, ~3.3GB)...")
+        result = subprocess.run(
+            [CONTAINER_RUNTIME, 'pull', image],
+            check=False
+        )
+        if result.returncode != 0:
+            print(f"Warning: Failed to pull {image} to local registry")
+            return False
+        print(f"✓ Cached {image} in local {CONTAINER_RUNTIME} registry")
+    else:
+        print(f"✓ Found {image} in local {CONTAINER_RUNTIME} registry (cached)")
+
+    # Step 4: Load from local registry to minikube via tar
+    print(f"Loading {image} into minikube...")
+    tar_file = '/tmp/ollama-image.tar'
+    try:
+        subprocess.run(
+            [CONTAINER_RUNTIME, 'save', '-o', tar_file, image],
+            check=True
+        )
+        subprocess.run(
+            ['minikube', 'image', 'load', tar_file],
+            check=True
+        )
+        print(f"✓ Loaded {image} into minikube from local cache")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error: Failed to load image into minikube: {e}")
         return False
-
-    print(f"✓ Image {image} pre-pulled successfully")
-    return True
+    finally:
+        if os.path.exists(tar_file):
+            os.remove(tar_file)

@@ -14,6 +14,7 @@ For detailed architecture, implementation details, and query examples see the [d
 - Podman or Docker CLI
 - Minikube
 - kubectl
+- ollama (if using LLM chatbot functionality)
 
 ### Start Minikube
 ```bash
