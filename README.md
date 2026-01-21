@@ -23,6 +23,9 @@ minikube start --cpus=4 --memory=12288 --disk-size=50g
 
 # With LLM chatbot (Ollama)
 minikube start --cpus=6 --memory=16384 --disk-size=80g
+
+# On macos with podman/docker
+minikube start --cpus=6 --memory=16384 --disk-size=80g --driver=podman
 ```
 
 ## Quick Start
