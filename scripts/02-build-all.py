@@ -8,6 +8,12 @@ import xml.etree.ElementTree as ET
 from common import run_command, setup_container_runtime, CONTAINER_RUNTIME
 
 
+def get_target_platform() -> str:
+    """Get target platform for container builds from environment variable."""
+    target_arch = os.getenv('TARGET_ARCH', 'amd64')
+    return f'linux/{target_arch}'
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -53,17 +59,17 @@ def ensure_prerequisites_built(native: bool = False) -> None:
     if native:
         # For native builds, always clean and rebuild with native profile
         print("\n=== Building prerequisite modules (schemas, common) for native ===")
-        run_command(['mvn', 'clean', 'install', '-pl', 'schemas,common', '-Dnative', '-DskipTests'])
+        run_command(['mvn', 'clean', 'install', '-pl', 'schemas,common', '-am', '-Dnative', '-DskipTests'])
     else:
         schemas_built = os.path.isdir('schemas/target/classes')
         common_built = os.path.isdir('common/target/classes')
 
         if not schemas_built or not common_built:
             print("\n=== Building prerequisite modules (schemas, common) ===")
-            run_command(['mvn', 'clean', 'install', '-pl', 'schemas,common', '-DskipTests'])
+            run_command(['mvn', 'clean', 'install', '-pl', 'schemas,common', '-DskipTests', '-am'])
 
 
-def build_query_api_native(skip_tests: bool, runtime_path: str) -> None:
+def build_query_api_native(skip_tests: bool, runtime_path: str, target_platform: str) -> None:
     """Build query-api as a GraalVM native image with container."""
     print("\n=== Building query-api (Native mode) ===")
 
@@ -71,12 +77,16 @@ def build_query_api_native(skip_tests: bool, runtime_path: str) -> None:
 
     # Use clean package to ensure fresh compilation with Java 21
     # Always build container image along with native executable
+    quarkus_jib_executable = f'-Dquarkus.jib.docker-executable-name={CONTAINER_RUNTIME}'
     mvn_args = [
         'mvn', 'clean', 'package',
         '-Dnative',
         '-Dquarkus.native.container-build=true',
         '-Dquarkus.container-image.build=true',
-        f'-Djib.dockerClient.executable={runtime_path}'
+        f'-Djib.dockerClient.executable={runtime_path}',
+        f'-Djib.from.platforms={target_platform}',
+        f'-Djib.to.platforms={target_platform}',
+        quarkus_jib_executable
     ]
 
     if skip_tests:
@@ -102,34 +112,58 @@ def verify_native_build() -> bool:
         return False
 
 
-def build_container_images(runtime_path: str, native_query_api: bool = False) -> None:
+def build_container_images(runtime_path: str, target_platform: str, native_query_api: bool = False) -> None:
     """Build container images for all services.
 
     Args:
         runtime_path: Path to container runtime (podman/docker)
+        target_platform: Target platform for container images (e.g., 'linux/arm64')
         native_query_api: If True, query-api container was already built during native build
     """
     print("\n=== Building Container Images ===")
+    print(f"Target platform: {target_platform}")
 
-    # Build data-generators and streams-processor container images (always JVM)
     if CONTAINER_RUNTIME == 'podman':
         print("Using Podman for container builds...")
     else:
         print("Using Docker for container builds...")
 
+    # Build data-generators container image
+    print("\n--- Building data-generators container ---")
     run_command([
-        'mvn', 'compile', 'jib:dockerBuild',
-        '-pl', 'data-generators,streams-processor',
-        f'-Djib.dockerClient.executable={runtime_path}'
+        'mvn', 'clean', 'compile', '-pl', 'data-generators', '-am'
+    ])
+    run_command([
+        'mvn', 'compile', 'jib:dockerBuild', '-pl', 'data-generators',
+        f'-Djib.dockerClient.executable={runtime_path}',
+        f'-Djib.from.platforms={target_platform}',
+        f'-Djib.to.platforms={target_platform}'
+    ])
+
+    # Build streams-processor container image
+    print("\n--- Building streams-processor container ---")
+    run_command([
+        'mvn', 'clean', 'compile', '-pl', 'streams-processor', '-am'
+    ])
+    run_command([
+        'mvn', 'compile', 'jib:dockerBuild', '-pl', 'streams-processor',
+        f'-Djib.dockerClient.executable={runtime_path}',
+        f'-Djib.from.platforms={target_platform}',
+        f'-Djib.to.platforms={target_platform}'
     ])
 
     # Build query-api container image (only if JVM mode - native builds it already)
     if not native_query_api:
+        print("\n--- Building query-api container ---")
         os.chdir('query-api')
+        quarkus_jib_executable = f'-Dquarkus.jib.docker-executable-name={CONTAINER_RUNTIME}'
         run_command([
             'mvn', 'package',
             '-Dquarkus.container-image.build=true',
-            f'-Djib.dockerClient.executable={runtime_path}'
+            f'-Djib.dockerClient.executable={runtime_path}',
+            f'-Djib.from.platforms={target_platform}',
+            f'-Djib.to.platforms={target_platform}',
+            quarkus_jib_executable
         ])
         os.chdir('..')
 
@@ -208,19 +242,16 @@ def main():
 
     runtime_path = setup_container_runtime()
 
+    # Get target platform for container builds
+    target_platform = get_target_platform()
+    print(f"Target platform: {target_platform}")
+
     # 1. Build prerequisites (schemas, common)
     ensure_prerequisites_built(native=args.native)
 
-    # 2. Build data-generators and streams-processor (always JVM)
-    print("\n=== Building data-generators ===")
-    run_command(['mvn', 'clean', 'package', '-pl', 'data-generators'])
-
-    print("\n=== Building streams-processor ===")
-    run_command(['mvn', 'clean', 'package', '-pl', 'streams-processor'])
-
-    # 3. Build query-api (native or JVM based on flag)
+    # 2. Build query-api (native or JVM based on flag)
     if args.native:
-        build_query_api_native(args.skip_tests, runtime_path)
+        build_query_api_native(args.skip_tests, runtime_path, target_platform)
         verify_native_build()
     else:
         print("\n=== Building query-api (JVM mode) ===")
@@ -228,10 +259,10 @@ def main():
         run_command(['mvn', 'clean', 'package'])
         os.chdir('..')
 
-    # 4. Build container images for all services
-    build_container_images(runtime_path, native_query_api=args.native)
+    # 3. Build container images for all services
+    build_container_images(runtime_path, target_platform, native_query_api=args.native)
 
-    # 5. Load to minikube if requested
+    # 4. Load to minikube if requested
     if args.load_minikube:
         load_images_to_minikube(['data-generators', 'streams-processor', 'query-api'])
 

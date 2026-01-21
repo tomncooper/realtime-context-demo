@@ -57,10 +57,10 @@ This script will deploy a Strimzi-managed Kafka cluster, Apicurio Registry, Post
 export CONTAINER_RUNTIME=podman  # or docker
 
 # Build and load images to minikube
-python3 scripts/02-build-all.py
+python3 scripts/02-build-all.py --load-minikube
 
 # OR build native images (faster startup, lower memory)
-python3 scripts/02-build-all.py --native
+python3 scripts/02-build-all.py --native --load-minikube
 ```
 
 ### 3. Deploy Applications
