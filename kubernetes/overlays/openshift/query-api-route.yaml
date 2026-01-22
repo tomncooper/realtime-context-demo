@@ -1,0 +1,21 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: query-api
+  namespace: smartship
+  labels:
+    app: query-api
+  annotations:
+    # Increase timeouts for LLM requests
+    haproxy.router.openshift.io/timeout: 300s
+    haproxy.router.openshift.io/server-timeout: 300s
+    haproxy.router.openshift.io/client-timeout: 300s
+spec:
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: query-api
+  port:
+    targetPort: 8080

@@ -8,6 +8,7 @@ For detailed architecture, implementation details, and query examples see the [d
 
 ### Required Tools
 
+#### For Minikube
 - Java 25 LTS (or compatible JDK)
 - Maven 3.9+
 - Python 3.9+
@@ -28,7 +29,7 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g
 minikube start --cpus=6 --memory=16384 --disk-size=80g --driver=podman
 ```
 
-## Quick Start
+## Quick Start (Minikube)
 
 ### 1. Setup Infrastructure
 
@@ -78,7 +79,70 @@ python3 scripts/03-deploy-apps.py
 python3 scripts/04-validate.py
 ```
 
-## Testing the System
+## OpenShift Deployment
+
+### Prerequisites
+
+1. **OpenShift Access**: Ensure you have access to an OpenShift cluster
+2. **Login**: Log in to your OpenShift cluster
+   ```bash
+   oc login <your-openshift-api-url>
+   ```
+
+### 1. Setup Infrastructure
+
+Deploy infrastructure components (Kafka, Apicurio Registry, PostgreSQL):
+```bash
+python3 scripts/01-setup-infra.py
+```
+
+### 2. Build and Push Images to OpenShift Registry
+
+```bash
+# Optional: Set container runtime (default: podman)
+export CONTAINER_RUNTIME=podman
+
+# Optional: Set target architecture (auto-detected if not set)
+export TARGET_ARCH=amd64  # or arm64
+
+# Build images and push to OpenShift internal registry
+python3 scripts/02-build-all.py --push-ocp
+
+# OR build native images (faster startup, lower memory)
+python3 scripts/02-build-all.py --native --push-ocp
+```
+
+### 3. Deploy Applications to OpenShift
+
+```bash
+# Deploy with OpenShift overlay (includes routes and registry images)
+python3 scripts/03-deploy-apps.py --ocp
+```
+
+This deploys applications with:
+- **Image references**: OpenShift internal registry (`image-registry.openshift-image-registry.svc:5000/smartship/*`)
+- **HTTPS routes**: Automatic TLS termination and external access
+- **Pull policy**: Always pull from registry
+
+### 4. Access Applications via Routes
+
+Get the route URLs:
+```bash
+oc get routes -n smartship
+```
+
+Access the applications:
+- **Web UI Dashboard**: `https://query-api-smartship.apps.<your-cluster-domain>/`
+- **API Swagger**: `https://query-api-smartship.apps.<your-cluster-domain>/swagger-ui`
+- **Streams Processor**: `https://streams-processor-smartship.apps.<your-cluster-domain>/state/active-shipments-by-status`
+
+### 5. Validate Deployment
+
+```bash
+python3 scripts/04-validate.py
+```
+
+## Testing the System (Minikube)
 
 ### Port Forwarding
 
@@ -91,7 +155,7 @@ kubectl port-forward svc/streams-processor 7070:7070 -n smartship &
 
 Open http://localhost:8080/ to access the dashboard with:
 
-### Query Examples
+### Query Examples (Minikube)
 
 ```bash
 # REST API
@@ -106,6 +170,34 @@ curl -X POST http://localhost:8080/api/chat \
 
 # OpenAPI/Swagger UI
 open http://localhost:8080/swagger-ui
+```
+
+## Testing the System (OpenShift)
+
+### Query Examples (OpenShift Routes)
+
+Replace `<your-cluster-domain>` with your actual OpenShift cluster domain:
+
+```bash
+# Set your cluster domain for convenience
+export CLUSTER_DOMAIN="apps.kornys.strimzi.app-services-dev.net"
+
+# REST API
+curl https://query-api-smartship.${CLUSTER_DOMAIN}/api/shipments/status/all | jq
+curl https://query-api-smartship.${CLUSTER_DOMAIN}/api/vehicles/state | jq
+curl https://query-api-smartship.${CLUSTER_DOMAIN}/api/reference/warehouses | jq
+
+# LLM Chat
+curl -X POST https://query-api-smartship.${CLUSTER_DOMAIN}/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How many shipments are in transit?"}'
+
+# Streams Processor Interactive Queries
+curl https://streams-processor-smartship.${CLUSTER_DOMAIN}/state/active-shipments-by-status | jq
+curl https://streams-processor-smartship.${CLUSTER_DOMAIN}/state/vehicle-current-state | jq
+
+# OpenAPI/Swagger UI
+open https://query-api-smartship.${CLUSTER_DOMAIN}/swagger-ui
 ```
 
 ### Monitor Logs
