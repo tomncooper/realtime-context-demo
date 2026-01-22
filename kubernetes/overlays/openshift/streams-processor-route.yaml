@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: streams-processor
+  namespace: smartship
+  labels:
+    app: streams-processor
+  annotations:
+    # Standard timeouts for interactive queries
+    haproxy.router.openshift.io/timeout: 60s
+spec:
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: streams-processor
+  port:
+    targetPort: 7070

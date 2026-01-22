@@ -14,6 +14,63 @@ def get_target_platform() -> str:
     return f'linux/{target_arch}'
 
 
+def get_ocp_registry_config() -> dict:
+    """Get OpenShift registry configuration from current context or environment."""
+    # Check if oc CLI is available
+    oc_path = subprocess.run(['which', 'oc'], capture_output=True, text=True)
+    if oc_path.returncode != 0:
+        print("Error: 'oc' CLI not found. Please install OpenShift CLI.")
+        sys.exit(1)
+
+    # Check if user is logged in
+    login_check = subprocess.run(['oc', 'whoami'], capture_output=True, text=True)
+    if login_check.returncode != 0:
+        print("Error: Not logged in to OpenShift. Please run 'oc login' first.")
+        sys.exit(1)
+
+    # Always use smartship project
+    project = 'smartship'
+
+    # Try to get registry URL from environment first
+    registry_url = os.getenv('OCP_REGISTRY_URL')
+
+    # If not set, try to detect from OpenShift routes
+    if not registry_url:
+        print("Auto-detecting OpenShift registry URL...")
+
+        # Try to get the image registry route
+        registry_route_cmd = subprocess.run([
+            'oc', 'get', 'route', 'default-route',
+            '-n', 'openshift-image-registry',
+            '--template={{.spec.host}}'
+        ], capture_output=True, text=True)
+
+        if registry_route_cmd.returncode == 0 and registry_route_cmd.stdout.strip():
+            registry_url = registry_route_cmd.stdout.strip()
+            print(f"Detected registry URL: {registry_url}")
+
+    if not registry_url:
+        print("Error: Could not detect OpenShift registry URL.")
+        print("Please set OCP_REGISTRY_URL environment variable:")
+        print("export OCP_REGISTRY_URL=default-route-openshift-image-registry.apps.cluster.example.com")
+        sys.exit(1)
+
+    # Get authentication token
+    token_cmd = subprocess.run(['oc', 'whoami', '-t'], capture_output=True, text=True)
+    if token_cmd.returncode != 0:
+        print("Error: Could not get OpenShift token.")
+        sys.exit(1)
+
+    token = token_cmd.stdout.strip()
+
+    return {
+        'registry_url': registry_url,
+        'project': project,
+        'token': token,
+        'user': 'user'  # Static username - token provides authentication
+    }
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -30,6 +87,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--load-minikube', action='store_true',
         help='Load container images into minikube'
+    )
+    parser.add_argument(
+        '--push-ocp', action='store_true',
+        help='Push container images to OpenShift registry'
     )
     return parser.parse_args()
 
@@ -230,6 +291,86 @@ def retag_minikube_images(images: list[str]) -> None:
             print(f"  ✗ Failed to retag {image}: {e}")
 
 
+def push_images_to_ocp(images: list[str], ocp_config: dict) -> None:
+    """Push container images to OpenShift registry.
+
+    Args:
+        images: List of image names (e.g., ['data-generators', 'query-api'])
+        ocp_config: OpenShift registry configuration
+    """
+    print("\n=== Pushing images to OpenShift registry ===")
+    print(f"Registry: {ocp_config['registry_url']}")
+    print(f"Project: {ocp_config['project']}")
+    print(f"Logged in as: {ocp_config['user']}")
+
+    # Verify project exists or create it
+    project_check = subprocess.run(['oc', 'get', 'project', ocp_config['project']],
+                                 capture_output=True, text=True)
+    if project_check.returncode != 0:
+        print(f"Creating project: {ocp_config['project']}")
+        run_command(['oc', 'new-project', ocp_config['project']])
+    else:
+        print(f"Using existing project: {ocp_config['project']}")
+
+    # Login to registry using OpenShift token
+    print(f"\n--- Authenticating with OpenShift registry ---")
+    if CONTAINER_RUNTIME == 'podman':
+        login_cmd = [
+            'podman', 'login',
+            '--tls-verify=false',
+            '-u', ocp_config['user'],
+            '-p', ocp_config['token'],
+            ocp_config['registry_url']
+        ]
+    else:
+        # Note: Docker may require daemon config for insecure registry
+        login_cmd = [
+            'docker', 'login',
+            '-u', ocp_config['user'],
+            '-p', ocp_config['token'],
+            ocp_config['registry_url']
+        ]
+
+    # Run login command with suppressed output to avoid showing token
+    result = subprocess.run(login_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Error: Failed to authenticate with registry")
+        print(f"Registry: {ocp_config['registry_url']}")
+        print(f"STDERR: {result.stderr}")
+        if result.stdout:
+            print(f"STDOUT: {result.stdout}")
+        sys.exit(1)
+    print("✓ Successfully authenticated with OpenShift registry")
+
+    # Push each image
+    for image in images:
+        local_image = f'smartship/{image}:latest'
+        ocp_image = f'{ocp_config["registry_url"]}/{ocp_config["project"]}/{image}:latest'
+
+        print(f"\n--- Pushing {image} ---")
+
+        # Tag for OCP registry
+        if CONTAINER_RUNTIME == 'podman':
+            run_command(['podman', 'tag', local_image, ocp_image])
+            run_command(['podman', 'push', '--tls-verify=false', ocp_image])
+        else:
+            run_command(['docker', 'tag', local_image, ocp_image])
+            run_command(['docker', 'push', ocp_image])
+
+        print(f"✓ Pushed: {ocp_image}")
+
+    print(f"\n=== OpenShift deployment info ===")
+    print("Images are now available in OpenShift registry:")
+    for image in images:
+        ocp_image = f'{ocp_config["registry_url"]}/{ocp_config["project"]}/{image}:latest'
+        print(f"  {ocp_image}")
+
+    print(f"\nTo deploy, update your Kubernetes manifests to use:")
+    print(f"  image: {ocp_config['registry_url']}/{ocp_config['project']}/{{module}}:latest")
+    print(f"\nOr use internal registry reference:")
+    print(f"  image: image-registry.openshift-image-registry.svc:5000/{ocp_config['project']}/{{module}}:latest")
+
+
 def main():
     args = parse_args()
 
@@ -266,6 +407,11 @@ def main():
     if args.load_minikube:
         load_images_to_minikube(['data-generators', 'streams-processor', 'query-api'])
 
+    # 5. Push to OpenShift registry if requested
+    if args.push_ocp:
+        ocp_config = get_ocp_registry_config()
+        push_images_to_ocp(['data-generators', 'streams-processor', 'query-api'], ocp_config)
+
     print("\n" + "=" * 60)
     print("Build complete!")
     print(f"Container runtime used: {runtime_path}")
@@ -273,6 +419,13 @@ def main():
         print("Query-API: Native image")
     else:
         print("Query-API: JVM mode")
+
+    if args.load_minikube:
+        print("Images loaded into minikube")
+    elif args.push_ocp:
+        print("Images pushed to OpenShift registry")
+    else:
+        print("Images built locally only")
     print("=" * 60)
 
     return 0

@@ -51,7 +51,7 @@ spec:
       # Init container pulls model if not already present
       initContainers:
         - name: model-loader
-          image: ollama/ollama:latest
+          image: mirror.gcr.io/ollama/ollama:latest
           command:
             - /bin/sh
             - -c
@@ -85,9 +85,11 @@ spec:
           env:
             - name: OLLAMA_HOST
               value: "0.0.0.0:11434"
+            - name: HOME
+              value: "/opt/ollama"
           volumeMounts:
             - name: ollama-data
-              mountPath: /root/.ollama
+              mountPath: /opt/ollama
           resources:
             requests:
               memory: "2Gi"
@@ -97,7 +99,7 @@ spec:
               cpu: "2000m"
       containers:
         - name: ollama
-          image: ollama/ollama:latest
+          image: mirror.gcr.io/ollama/ollama:latest
           ports:
             - containerPort: 11434
               name: http
@@ -107,6 +109,8 @@ spec:
             # Keep models in memory for faster responses
             - name: OLLAMA_KEEP_ALIVE
               value: "24h"
+            - name: HOME
+              value: "/opt/ollama"
           resources:
             requests:
               memory: "4Gi"
@@ -116,7 +120,7 @@ spec:
               cpu: "4000m"
           volumeMounts:
             - name: ollama-data
-              mountPath: /root/.ollama
+              mountPath: /opt/ollama
           # Readiness probe - check if model is loaded and ready
           readinessProbe:
             exec:
