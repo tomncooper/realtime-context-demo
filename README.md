@@ -18,7 +18,7 @@ For detailed architecture, implementation details, and query examples see the [d
 
 ### Start Kubernetes Cluster
 
-#### Option 1: kind (Recommended)
+#### Option 1: kind
 
 ```bash
 # Create with default settings
