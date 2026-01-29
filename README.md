@@ -42,12 +42,15 @@ minikube start --cpus=6 --memory=16384 --disk-size=80g --driver=podman
 
 **Step 0: Set your cluster type** (optional, default is `minikube`):
 ```bash
-export CLUSTER_TYPE=kind        # recommended for new users
+export CLUSTER_TYPE=kind
 # OR
 export CLUSTER_TYPE=minikube    # default
 # OR
 export CLUSTER_TYPE=openshift   # for OpenShift deployments
 ```
+
+In case you are using `Kind`, the default mechanism to get cluster name basically list all kind clusters and take the first one.
+If your cluster is not on the first line, you can specify the name via `KIND_CLUSTER_NAME` env var.
 
 All subsequent commands work the same regardless of cluster type!
 
