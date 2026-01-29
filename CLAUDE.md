@@ -371,38 +371,54 @@ mvn verify -pl query-api
 
 ## Deployment (Python Scripts)
 
-**Container Runtime:** Set `CONTAINER_RUNTIME=podman` (default) or `CONTAINER_RUNTIME=docker`
+**Cluster Type:** Set `CLUSTER_TYPE=minikube` (default), `kind`, or `openshift`
+**Container Runtime:** Set `CONTAINER_RUNTIME=podman` (default) or `docker`
 
 ```bash
-# Prerequisites: minikube running with adequate resources
-# Without Ollama (Phase 1-5):
-minikube start --cpus=4 --memory=12288 --disk-size=50g
+# Step 0: Start Kubernetes cluster
 
-# With Ollama for LLM chat (Phase 6+):
+# Option A: kind
+kind create cluster
+
+# Option B: minikube
 minikube start --cpus=6 --memory=16384 --disk-size=80g
 
-# 1. Setup infrastructure (Strimzi, Kafka KRaft, Apicurio, PostgreSQL, Ollama)
+# Option C: OpenShift
+oc login <your-openshift-api-url>
+
+# Step 1: Set cluster type (optional, default is minikube)
+export CLUSTER_TYPE=kind  # or minikube (default), or openshift
+
+# Step 2: Setup infrastructure (Strimzi, Kafka KRaft, Apicurio, PostgreSQL, Ollama)
 python3 scripts/01-setup-infra.py
 
 # Or with pre-loaded models (faster startup, avoids in-cluster download):
 python3 scripts/01-setup-infra.py --models llama3.2
 
-# 2. Build all modules and container images
-python3 scripts/02-build-all.py
+# Step 3: Build all modules and load images to cluster
+python3 scripts/02-build-all.py --load-images
 
-# 3. Deploy applications (data-generators, streams-processor, query-api)
+# Step 4: Deploy applications (data-generators, streams-processor, query-api)
 python3 scripts/03-deploy-apps.py
 
-# 4. Validate end-to-end functionality
+# Step 5: Validate end-to-end functionality
 python3 scripts/04-validate.py
 ```
+
+**Cluster-Specific Behavior:**
+- **kind**: Uses `kubernetes/overlays/kind` (imagePullPolicy: IfNotPresent)
+- **minikube**: Uses base manifests `kubernetes/applications`
+- **openshift**: Uses `kubernetes/overlays/openshift` (OpenShift Routes, internal registry)
 
 **Script Architecture:** All scripts import `scripts/common.py` which provides:
 - `kubectl()` - kubectl wrapper
 - `wait_for_condition()` - wait for K8s resource readiness (Deployments)
 - `wait_for_statefulset_ready()` - wait for StatefulSet pods to be ready
 - `setup_container_runtime()` - podman/docker detection
-- `get_minikube_env()` - container runtime environment setup
+- `get_cluster_name()` - get cluster name based on CLUSTER_TYPE
+- `prepull_ollama_image()` - pre-pull Ollama image (supports kind/minikube)
+- `upload_ollama_models_to_kind()` - upload Ollama models to kind node
+- `upload_ollama_models_to_minikube()` - upload Ollama models to minikube node
 - `verify_kafka_data_flow()` - verify Kafka topic data flow
 
 ## Working with Avro Schemas

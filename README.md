@@ -8,16 +8,25 @@ For detailed architecture, implementation details, and query examples see the [d
 
 ### Required Tools
 
-#### For Minikube
 - Java 25 LTS (or compatible JDK)
 - Maven 3.9+
 - Python 3.9+
 - Podman or Docker CLI
-- Minikube
+- **kind** or **Minikube** (Kubernetes cluster)
 - kubectl
 - ollama (if using LLM chatbot functionality)
 
-### Start Minikube
+### Start Kubernetes Cluster
+
+#### Option 1: kind (Recommended)
+
+```bash
+# Create with default settings
+kind create cluster --name kind-cluster
+```
+
+#### Option 2: Minikube
+
 ```bash
 # Standard deployment (without LLM chatbot)
 minikube start --cpus=4 --memory=12288 --disk-size=50g
@@ -25,31 +34,39 @@ minikube start --cpus=4 --memory=12288 --disk-size=50g
 # With LLM chatbot (Ollama)
 minikube start --cpus=6 --memory=16384 --disk-size=80g
 
-# On macos with podman/docker
+# On macOS with podman/docker
 minikube start --cpus=6 --memory=16384 --disk-size=80g --driver=podman
 ```
 
-## Quick Start (Minikube)
+## Quick Start
+
+**Step 0: Set your cluster type** (optional, default is `minikube`):
+```bash
+export CLUSTER_TYPE=kind        # recommended for new users
+# OR
+export CLUSTER_TYPE=minikube    # default
+# OR
+export CLUSTER_TYPE=openshift   # for OpenShift deployments
+```
+
+All subsequent commands work the same regardless of cluster type!
 
 ### 1. Setup Infrastructure
 
-You can run the base setup which includes downloading and installing Ollama into minikube:
 ```bash
 python3 scripts/01-setup-infra.py
 ```
 
-Alternatively, you can specify a model to download to your local Ollama installation and load into minikube.
-This means the next time you run the setup will be faster as the model is cached in your local Ollama installation and not downloaded again:
+**Options:**
 ```bash
+# Pre-load Ollama models from local machine (faster subsequent deployments)
 python3 scripts/01-setup-infra.py --models llama3.2
-```
 
-You can also skip the Ollama installation if you do not want the LLM chatbot functionality:
-```bash
+# Skip Ollama (no LLM chatbot)
 python3 scripts/01-setup-infra.py --skip-ollama
 ```
 
-This script will deploy a Strimzi-managed Kafka cluster, Apicurio Registry, PostgreSQL, and optionally Ollama.
+This deploys: Strimzi-managed Kafka cluster, Apicurio Registry, PostgreSQL, and optionally Ollama.
 
 ### 2. Build All Modules
 
@@ -57,14 +74,14 @@ This script will deploy a Strimzi-managed Kafka cluster, Apicurio Registry, Post
 # Optional: Set container runtime (default: podman)
 export CONTAINER_RUNTIME=podman  # or docker
 
-# Export target image platform
-export TARGET_ARCH=amd64 # or arm64
+# Optional: Set target architecture (default: amd64)
+export TARGET_ARCH=amd64  # or arm64
 
-# Build and load images to minikube
-python3 scripts/02-build-all.py --load-minikube
+# Build and load images to cluster (auto-detects based on CLUSTER_TYPE)
+python3 scripts/02-build-all.py --load-images
 
 # OR build native images (faster startup, lower memory)
-python3 scripts/02-build-all.py --native --load-minikube
+python3 scripts/02-build-all.py --native --load-images
 ```
 
 ### 3. Deploy Applications
@@ -73,58 +90,36 @@ python3 scripts/02-build-all.py --native --load-minikube
 python3 scripts/03-deploy-apps.py
 ```
 
+Automatically uses the correct overlay for your cluster type (kind/minikube/openshift).
+
 ### 4. Validate Deployment
 
 ```bash
 python3 scripts/04-validate.py
 ```
 
-## OpenShift Deployment
+## OpenShift-Specific Notes
+
+For OpenShift deployments, follow the same Quick Start steps above with `CLUSTER_TYPE=openshift`, plus these additional prerequisites:
 
 ### Prerequisites
 
-1. **OpenShift Access**: Ensure you have access to an OpenShift cluster
-2. **Login**: Log in to your OpenShift cluster
+1. **Login to OpenShift**:
    ```bash
    oc login <your-openshift-api-url>
    ```
 
-### 1. Setup Infrastructure
+2. **Set cluster type**:
+   ```bash
+   export CLUSTER_TYPE=openshift
+   ```
 
-Deploy infrastructure components (Kafka, Apicurio Registry, PostgreSQL):
-```bash
-python3 scripts/01-setup-infra.py
-```
-
-### 2. Build and Push Images to OpenShift Registry
-
-```bash
-# Optional: Set container runtime (default: podman)
-export CONTAINER_RUNTIME=podman
-
-# Optional: Set target architecture (auto-detected if not set)
-export TARGET_ARCH=amd64  # or arm64
-
-# Build images and push to OpenShift internal registry
-python3 scripts/02-build-all.py --push-ocp
-
-# OR build native images (faster startup, lower memory)
-python3 scripts/02-build-all.py --native --push-ocp
-```
-
-### 3. Deploy Applications to OpenShift
-
-```bash
-# Deploy with OpenShift overlay (includes routes and registry images)
-python3 scripts/03-deploy-apps.py --ocp
-```
-
-This deploys applications with:
+Then follow the standard Quick Start steps. The OpenShift overlay automatically configures:
 - **Image references**: OpenShift internal registry (`image-registry.openshift-image-registry.svc:5000/smartship/*`)
 - **HTTPS routes**: Automatic TLS termination and external access
 - **Pull policy**: Always pull from registry
 
-### 4. Access Applications via Routes
+### Access Applications via Routes
 
 Get the route URLs:
 ```bash
@@ -135,12 +130,6 @@ Access the applications:
 - **Web UI Dashboard**: `https://query-api-smartship.apps.<your-cluster-domain>/`
 - **API Swagger**: `https://query-api-smartship.apps.<your-cluster-domain>/swagger-ui`
 - **Streams Processor**: `https://streams-processor-smartship.apps.<your-cluster-domain>/state/active-shipments-by-status`
-
-### 5. Validate Deployment
-
-```bash
-python3 scripts/04-validate.py
-```
 
 ## Testing the System (Minikube)
 

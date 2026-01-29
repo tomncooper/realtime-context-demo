@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from common import run_command, setup_container_runtime, CONTAINER_RUNTIME
+from common import run_command, setup_container_runtime, CONTAINER_RUNTIME, CLUSTER_TYPE, get_cluster_name
 
 
 def get_target_platform() -> str:
@@ -84,13 +84,10 @@ def parse_args() -> argparse.Namespace:
         '--skip-tests', action='store_true',
         help='Skip running tests during build'
     )
+
     parser.add_argument(
-        '--load-minikube', action='store_true',
-        help='Load container images into minikube'
-    )
-    parser.add_argument(
-        '--push-ocp', action='store_true',
-        help='Push container images to OpenShift registry'
+        '--load-images', action='store_true',
+        help='Load container images into cluster (auto-detects kind/minikube/openshift from CLUSTER_TYPE)'
     )
     return parser.parse_args()
 
@@ -272,7 +269,7 @@ def retag_minikube_images(images: list[str]) -> None:
     """Remove localhost prefix from images in minikube (podman issue).
 
     Args:
-        images: List of image names without localhost prefix 
+        images: List of image names without localhost prefix
                 (e.g., 'smartship/data-generators:latest')
     """
     print("\n=== Retagging images in minikube (removing localhost prefix) ===")
@@ -289,6 +286,48 @@ def retag_minikube_images(images: list[str]) -> None:
         except (subprocess.CalledProcessError, RuntimeError) as e:
             # Don't fail the build, as the localhost-prefixed image still works if we update deployments
             print(f"  ✗ Failed to retag {image}: {e}")
+
+
+def load_images_to_kind(images: list[str], cluster_name: str = None) -> None:
+    """Load container images into kind cluster.
+
+    Args:
+        images: List of image names (e.g., ['data-generators', 'query-api'])
+        cluster_name: Name of kind cluster (default: from env or 'kind')
+    """
+    if cluster_name is None:
+        cluster_name = get_cluster_name() or 'kind'
+
+    print(f"\n=== Loading images into kind cluster '{cluster_name}' ===")
+
+    # kind load docker-image only works with Docker, not Podman
+    # For Podman, we need to use image-archive (tar file)
+    if CONTAINER_RUNTIME == 'podman':
+        print("Using Podman → creating tar archives for kind")
+        for image in images:
+            image_name = f'smartship/{image}:latest'
+            tar_file = f'/tmp/{image}.tar'
+
+            print(f"Loading {image_name}...")
+            print(f"  Creating tar archive...")
+            run_command([CONTAINER_RUNTIME, 'save', '-o', tar_file, image_name])
+
+            print(f"  Loading into kind cluster...")
+            run_command(['kind', 'load', 'image-archive', tar_file, '--name', cluster_name])
+
+            # Clean up tar file
+            run_command(['rm', '-f', tar_file])
+            print(f"  ✓ Loaded {image_name}")
+    else:
+        # Docker can use direct load
+        print("Using Docker → direct image load")
+        for image in images:
+            image_name = f'smartship/{image}:latest'
+            print(f"Loading {image_name}...")
+            run_command(['kind', 'load', 'docker-image', image_name, '--name', cluster_name])
+            print(f"  ✓ Loaded {image_name}")
+
+    print(f"\n✓ All images loaded into kind cluster '{cluster_name}'")
 
 
 def push_images_to_ocp(images: list[str], ocp_config: dict) -> None:
@@ -403,27 +442,40 @@ def main():
     # 3. Build container images for all services
     build_container_images(runtime_path, target_platform, native_query_api=args.native)
 
-    # 4. Load to minikube if requested
-    if args.load_minikube:
-        load_images_to_minikube(['data-generators', 'streams-processor', 'query-api'])
+    # 4. Load images to cluster if requested (auto-detect based on CLUSTER_TYPE)
+    if args.load_images:
+        images = ['data-generators', 'streams-processor', 'query-api']
 
-    # 5. Push to OpenShift registry if requested
-    if args.push_ocp:
-        ocp_config = get_ocp_registry_config()
-        push_images_to_ocp(['data-generators', 'streams-processor', 'query-api'], ocp_config)
+        if CLUSTER_TYPE == 'kind':
+            load_images_to_kind(images)
+        elif CLUSTER_TYPE == 'minikube':
+            load_images_to_minikube(images)
+        elif CLUSTER_TYPE == 'openshift':
+            ocp_config = get_ocp_registry_config()
+            push_images_to_ocp(images, ocp_config)
+        else:
+            print(f"Warning: Unknown CLUSTER_TYPE '{CLUSTER_TYPE}', defaulting to minikube")
+            load_images_to_minikube(images)
 
     print("\n" + "=" * 60)
     print("Build complete!")
     print(f"Container runtime used: {runtime_path}")
+    print(f"Cluster type: {CLUSTER_TYPE}")
     if args.native:
         print("Query-API: Native image")
     else:
         print("Query-API: JVM mode")
 
-    if args.load_minikube:
-        print("Images loaded into minikube")
-    elif args.push_ocp:
-        print("Images pushed to OpenShift registry")
+    if args.load_images:
+        if CLUSTER_TYPE == 'kind':
+            cluster_name = get_cluster_name() or 'kind'
+            print(f"Images loaded into kind cluster '{cluster_name}'")
+        elif CLUSTER_TYPE == 'minikube':
+            print("Images loaded into minikube")
+        elif CLUSTER_TYPE == 'openshift':
+            print("Images pushed to OpenShift registry")
+        else:
+            print(f"Images loaded (cluster type: {CLUSTER_TYPE})")
     else:
         print("Images built locally only")
     print("=" * 60)

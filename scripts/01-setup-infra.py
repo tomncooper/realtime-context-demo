@@ -4,8 +4,9 @@ import argparse
 import sys
 from common import (
     kubectl, wait_for_condition, wait_for_statefulset_ready,
-    KAFKA_CLUSTER_NAME, ensure_ollama_models, upload_ollama_models_to_minikube,
-    prepull_ollama_image
+    KAFKA_CLUSTER_NAME, CLUSTER_TYPE, ensure_ollama_models,
+    upload_ollama_models_to_minikube,
+    prepull_ollama_image, get_cluster_name
 )
 
 
@@ -52,10 +53,12 @@ def deploy_ollama_with_models(models: list):
         print("ERROR: Failed to ensure Ollama models are available")
         return False
 
-    # Upload models to minikube node
-    if not upload_ollama_models_to_minikube():
-        print("ERROR: Failed to upload models to minikube")
-        return False
+    # Upload models to cluster node (minikube)
+    cluster_name = get_cluster_name()
+    if CLUSTER_TYPE == 'minikube':
+        if not upload_ollama_models_to_minikube():
+            print("ERROR: Failed to upload models to minikube")
+            return False
 
     # Pre-pull the Ollama container image to avoid long download during pod startup
     prepull_ollama_image()

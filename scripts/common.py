@@ -11,6 +11,9 @@ from typing import List
 # Container runtime detection (podman is default)
 CONTAINER_RUNTIME = os.getenv('CONTAINER_RUNTIME', 'podman')
 
+# Cluster type detection (minikube is default, original implementation)
+CLUSTER_TYPE = os.getenv('CLUSTER_TYPE', 'minikube')
+
 KAFKA_CLUSTER_NAME = "events-cluster"
 NAMESPACE = "smartship"
 
@@ -347,26 +350,60 @@ def upload_ollama_models_to_minikube() -> bool:
     return True
 
 
+def get_cluster_name() -> str:
+    """Get the cluster name based on cluster type.
+
+    For kind clusters, auto-detects from 'kind get clusters' if not set.
+
+    Returns:
+        Cluster name (default: 'kind' for kind, None for minikube)
+    """
+    if CLUSTER_TYPE == 'kind':
+        # First check env var
+        env_cluster = os.getenv('KIND_CLUSTER_NAME')
+        if env_cluster:
+            return env_cluster
+
+        # Auto-detect from kind get clusters
+        try:
+            result = subprocess.run(
+                ['kind', 'get', 'clusters'],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode == 0:
+                clusters = result.stdout.strip().split('\n')
+                # Filter out empty strings
+                clusters = [c for c in clusters if c]
+                if clusters:
+                    # Return first cluster found
+                    detected_cluster = clusters[0]
+                    print(f"Auto-detected kind cluster: {detected_cluster}")
+                    return detected_cluster
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        # Fallback to default
+        return 'kind'
+
+    return None
+
+
 def prepull_ollama_image() -> bool:
-    """Pre-pull the Ollama container image into minikube.
+    """Pre-pull the Ollama container image into cluster (minikube or kind).
 
     Always caches the image in the local container registry first, then loads
-    into minikube via tar. This persists the image across minikube delete/recreate
+    into the cluster. This persists the image across cluster delete/recreate
     cycles, avoiding repeated downloads from Docker Hub.
     """
     image = "ollama/ollama:latest"
+    cluster_name = get_cluster_name()
+
     print(f"\n=== Pre-pulling Ollama image ({image}) ===")
+    print(f"Cluster type: {CLUSTER_TYPE}" + (f" (cluster: {cluster_name})" if cluster_name else ""))
 
-    # Step 1: Check if already in minikube
-    result = subprocess.run(
-        ['minikube', 'image', 'ls'],
-        capture_output=True, text=True, check=False
-    )
-    if result.returncode == 0 and 'ollama/ollama' in result.stdout:
-        print(f"✓ Image {image} already present in minikube")
-        return True
-
-    # Step 2: Check if image exists in local container registry
+    # Step 1: Check if image exists in local container registry
     if CONTAINER_RUNTIME == 'podman':
         check_cmd = [CONTAINER_RUNTIME, 'image', 'exists', image]
     else:
@@ -375,7 +412,7 @@ def prepull_ollama_image() -> bool:
     result = subprocess.run(check_cmd, capture_output=True, check=False)
     image_exists_locally = (result.returncode == 0)
 
-    # Step 3: If not in local registry, pull it there first (caches for future)
+    # Step 2: If not in local registry, pull it there first (caches for future)
     if not image_exists_locally:
         print(f"Image {image} not found in local {CONTAINER_RUNTIME} registry")
         print(f"Pulling {image} to local registry (this may take several minutes, ~3.3GB)...")
@@ -390,23 +427,65 @@ def prepull_ollama_image() -> bool:
     else:
         print(f"✓ Found {image} in local {CONTAINER_RUNTIME} registry (cached)")
 
-    # Step 4: Load from local registry to minikube via tar
-    print(f"Loading {image} into minikube...")
-    tar_file = '/tmp/ollama-image.tar'
-    try:
-        subprocess.run(
-            [CONTAINER_RUNTIME, 'save', '-o', tar_file, image],
-            check=True
-        )
-        subprocess.run(
-            ['minikube', 'image', 'load', tar_file],
-            check=True
-        )
-        print(f"✓ Loaded {image} into minikube from local cache")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Error: Failed to load image into minikube: {e}")
-        return False
-    finally:
-        if os.path.exists(tar_file):
-            os.remove(tar_file)
+    # Step 3: Load into cluster based on type
+    if CLUSTER_TYPE == 'kind':
+        print(f"Loading {image} into kind cluster '{cluster_name}'...")
+
+        # kind load docker-image only works with Docker, not Podman
+        # For Podman, we need to use image-archive (tar file)
+        if CONTAINER_RUNTIME == 'podman':
+            tar_file = '/tmp/ollama-image.tar'
+            try:
+                print(f"  Creating tar archive (Podman → kind)...")
+                subprocess.run(
+                    [CONTAINER_RUNTIME, 'save', '-o', tar_file, image],
+                    check=True
+                )
+                subprocess.run(
+                    ['kind', 'load', 'image-archive', tar_file, '--name', cluster_name],
+                    check=True
+                )
+                print(f"✓ Loaded {image} into kind cluster '{cluster_name}'")
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"Error: Failed to load image into kind: {e}")
+                return False
+            finally:
+                if os.path.exists(tar_file):
+                    os.remove(tar_file)
+        else:
+            # Docker can use direct load
+            try:
+                subprocess.run(
+                    ['kind', 'load', 'docker-image', image, '--name', cluster_name],
+                    check=True
+                )
+                print(f"✓ Loaded {image} into kind cluster '{cluster_name}'")
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"Error: Failed to load image into kind: {e}")
+                return False
+
+    elif CLUSTER_TYPE == 'minikube':
+        # Load from local registry to minikube via tar
+        print(f"Loading {image} into minikube...")
+        tar_file = '/tmp/ollama-image.tar'
+        try:
+            subprocess.run(
+                [CONTAINER_RUNTIME, 'save', '-o', tar_file, image],
+                check=True
+            )
+            subprocess.run(
+                ['minikube', 'image', 'load', tar_file],
+                check=True
+            )
+            print(f"✓ Loaded {image} into minikube from local cache")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error: Failed to load image into minikube: {e}")
+            return False
+        finally:
+            if os.path.exists(tar_file):
+                os.remove(tar_file)
+
+    return False
