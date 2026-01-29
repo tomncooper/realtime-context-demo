@@ -42,56 +42,52 @@ spec:
         app: ollama
         component: llm
     spec:
-      # Init container verifies model is present (should be pre-loaded)
+      # Init container verifies model files are present (lightweight check)
+      # We only check file existence - no need to start Ollama server
       initContainers:
-        - name: model-loader
-          image: ollama/ollama:latest
+        - name: model-verifier
+          image: busybox:latest
+          imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
             - |
-              echo "Starting Ollama server in background..."
-              ollama serve &
-              SERVER_PID=$!
+              echo "Verifying pre-loaded model files..."
 
-              # Wait for server to be ready
-              echo "Waiting for Ollama server to start..."
-              for i in $(seq 1 30); do
-                if ollama list >/dev/null 2>&1; then
-                  echo "Ollama server is ready"
-                  break
-                fi
-                sleep 1
-              done
-
-              # Check if model already exists (should be pre-loaded)
-              if ollama list | grep -q "llama3.2"; then
-                echo "Model llama3.2 already present (pre-loaded), skipping download"
+              # Check for model manifest directory
+              if [ -d "/root/.ollama/models/manifests" ]; then
+                echo "✓ Model manifests directory exists"
+                ls -la /root/.ollama/models/manifests/
               else
-                echo "Warning: Model not found in pre-loaded data, pulling..."
-                ollama pull llama3.2
-                echo "Model pull complete"
+                echo "ERROR: No model manifests found at /root/.ollama/models/manifests"
+                echo "Expected pre-loaded models from: scripts/01-setup-infra.py --models"
+                exit 1
               fi
 
-              # Stop the server
-              kill $SERVER_PID 2>/dev/null || true
-              echo "Init container complete"
-          env:
-            - name: OLLAMA_HOST
-              value: "0.0.0.0:11434"
+              # Check for blob directory (actual model weights)
+              if [ -d "/root/.ollama/models/blobs" ]; then
+                BLOB_COUNT=$(ls -1 /root/.ollama/models/blobs 2>/dev/null | wc -l)
+                echo "✓ Found $BLOB_COUNT model blob files"
+              else
+                echo "ERROR: No model blobs found at /root/.ollama/models/blobs"
+                exit 1
+              fi
+
+              echo "Pre-loaded model verification complete"
           volumeMounts:
             - name: ollama-data
               mountPath: /root/.ollama
           resources:
             requests:
-              memory: "2Gi"
-              cpu: "500m"
+              memory: "16Mi"
+              cpu: "50m"
             limits:
-              memory: "4Gi"
-              cpu: "2000m"
+              memory: "32Mi"
+              cpu: "100m"
       containers:
         - name: ollama
           image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 11434
               name: http
