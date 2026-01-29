@@ -49,8 +49,8 @@ export CLUSTER_TYPE=minikube    # default
 export CLUSTER_TYPE=openshift   # for OpenShift deployments
 ```
 
-In case you are using `Kind`, the default mechanism to get cluster name basically list all kind clusters and take the first one.
-If your cluster is not on the first line, you can specify the name via `KIND_CLUSTER_NAME` env var.
+If you are using `Kind`, the default mechanism to get the cluster name lists all kind clusters and selects the first one.
+If your desired Kind cluster is not the first one on the list, you can specify the name via `KIND_CLUSTER_NAME` env var.
 
 All subsequent commands work the same regardless of cluster type!
 
