@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../applications
+
+patches:
+- path: image-pull-policy-patch.yaml
+
+# Transform image names to use localhost prefix (Podman adds this when creating tar archives)
+images:
+- name: smartship/data-generators
+  newName: localhost/smartship/data-generators
+- name: smartship/streams-processor
+  newName: localhost/smartship/streams-processor
+- name: smartship/query-api
+  newName: localhost/smartship/query-api
